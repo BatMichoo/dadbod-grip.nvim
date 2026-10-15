@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-10-15
+
 ### Fixed
 
+- Preserve the welcome screen's cursor and scroll position when opening the
+  query pad above it with `splitkeep=screen`, including on Neovim 0.10.
 - Guard query-grid edits against aliased columns, computed projections, and
   bare SQL value expressions such as `CURRENT_TIMESTAMP` that can target an
   unrelated same-named column (#77). Preserve direct Unicode column references
@@ -666,7 +670,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.11.0...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.11.1...HEAD
+[3.11.1]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.11.1
 [3.11.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.11.0
 [3.10.2]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.2
 [3.10.1]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.1

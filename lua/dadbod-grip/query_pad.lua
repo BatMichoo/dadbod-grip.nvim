@@ -597,7 +597,12 @@ function M.open(url, opts)
 
   -- Find or create a window for the pad
   local pad_win = nil
+  local welcome_win, welcome_view
   for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if not welcome_win and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(winid)) == "grip://welcome" then
+      welcome_win = winid
+      welcome_view = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
+    end
     if vim.api.nvim_win_get_buf(winid) == bufnr then
       pad_win = winid
       break
@@ -660,6 +665,11 @@ function M.open(url, opts)
       pad_win = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(pad_win, bufnr)
       vim.api.nvim_win_set_height(pad_win, math.max(10, math.floor(vim.o.lines * 0.4)))
+    end
+
+    -- splitkeep=screen can scroll the welcome out of its opening view.
+    if welcome_win then
+      vim.api.nvim_win_call(welcome_win, function() vim.fn.winrestview(welcome_view) end)
     end
   end
 
