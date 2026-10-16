@@ -62,8 +62,8 @@ local function cleanup_grids()
 end
 
 --- Open a real grid for a table (same result shape init.lua builds).
-local function open_grid(tbl, page_size)
-  local spec = qmod.new_table(tbl, page_size or 100)
+local function open_grid(tbl, limit)
+  local spec = qmod.new_table(tbl, limit or 100)
   local sql_str = qmod.build_sql(spec)
   local result, err = db.query(sql_str, url)
   assert(result, "query failed for " .. tbl .. ": " .. tostring(err))

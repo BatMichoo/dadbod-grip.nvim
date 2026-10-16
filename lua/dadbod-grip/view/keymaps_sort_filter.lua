@@ -209,103 +209,14 @@ function M.setup(bufnr, ctx)
     filters.save(tbl, name, combined)
   end, "Save filter as preset")
 
-  -- ]p: next page
-  kmap("grid_next_page2", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    -- Check if we're on the last page
-    if session_p.total_rows then
-      local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
-      if session_p.query_spec.page >= total_pages then
-        vim.notify("Already on last page", vim.log.levels.INFO)
-        return
-      end
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.next_page(session_p.query_spec)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "Next page")
-
-  -- [p: previous page
-  kmap("grid_prev_page2", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    if session_p.query_spec.page <= 1 then
-      vim.notify("Already on first page", vim.log.levels.INFO)
-      return
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.prev_page(session_p.query_spec)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "Previous page")
-
-  -- ]P: jump to last page
-  kmap("grid_last_page", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    if not session_p.total_rows then
-      vim.notify("Total rows unknown", vim.log.levels.INFO)
-      return
-    end
-    local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
-    if session_p.query_spec.page >= total_pages then
-      vim.notify("Already on last page", vim.log.levels.INFO)
-      return
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.set_page(session_p.query_spec, total_pages)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "Last page")
-
-  -- [P: jump to first page
-  kmap("grid_first_page", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    if session_p.query_spec.page <= 1 then
-      vim.notify("Already on first page", vim.log.levels.INFO)
-      return
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.set_page(session_p.query_spec, 1)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "First page")
-
-  -- H/L: ergonomic page navigation (prev/next): single-key aliases for [p/]p
-  kmap("grid_prev_page", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    if session_p.query_spec.page <= 1 then
-      vim.notify("Already on first page", vim.log.levels.INFO)
-      return
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.prev_page(session_p.query_spec)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "Previous page")
-
-  kmap("grid_next_page", function()
-    local session_p = ctx.session()
-    if not session_p or not session_p.query_spec then return end
-    if session_p.total_rows then
-      local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
-      if session_p.query_spec.page >= total_pages then
-        vim.notify("Already on last page", vim.log.levels.INFO)
-        return
-      end
-    end
-    if not confirm_discard_changes("Page change") then return end
-    local new_spec = qmod.next_page(session_p.query_spec)
-    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
-  end, "Next page")
-
-  -- X: reset all query modifiers (sorts, filters, page)
+  -- X: reset all query modifiers (sorts, filters)
   kmap("grid_reset_view", function()
     local session_x = ctx.session()
     if not session_x or not session_x.query_spec then return end
     local spec = session_x.query_spec
     -- Pinned filters are the grid's baseline (FK context), not something a reset
     -- clears — a grid holding only those IS at its defaults.
-    if #spec.sorts == 0 and not qmod.has_filters(spec) and spec.page == 1 then
+    if #spec.sorts == 0 and not qmod.has_filters(spec) then
       vim.notify("View already at defaults", vim.log.levels.INFO)
       return
     end
@@ -313,7 +224,7 @@ function M.setup(bufnr, ctx)
     local new_spec = qmod.reset(session_x.query_spec)
     if session_x.on_requery then session_x.on_requery(bufnr, new_spec) end
     vim.notify("View reset", vim.log.levels.INFO)
-  end, "Reset view (clear sort/filter/page)")
+  end, "Reset view (clear sort/filter)")
 end
 
 return M

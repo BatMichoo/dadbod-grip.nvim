@@ -59,7 +59,7 @@ end
 
 -- ── built-in action list ───────────────────────────────────────────────────
 -- Labels use a fixed 10-char category tag for scannable alignment:
---   [nav]      [query]    [grid]     [filter]   [page]
+--   [nav]      [query]    [grid]     [filter]
 --   [analysis] [export]   [fk]       [ddl]
 --
 -- Keys are looked up from keymaps.lua at open() time so user remaps are
@@ -120,13 +120,9 @@ local function _build_actions()
     act("[filter]   Load filter preset",     k("grid_preset_load"), "Apply a saved filter preset",                                 { "grid" }),
     act("[filter]   Save filter preset",     k("grid_preset_save"), "Save current filters as a named preset",                      { "grid" }),
     act("[filter]   Clear all filters",      k("grid_filter_clear"),"Remove all active column filters",                            { "grid" }),
-    act("[filter]   Reset view",             k("grid_reset_view"),  "Clear sort, filter, and return to page 1",                    { "grid" }),
+    act("[filter]   Reset view",             k("grid_reset_view"),  "Clear sort and filter",                                       { "grid" }),
 
     -- ── Pagination ─────────────────────────────────────────────────────────
-    act("[page]     Next page",              k("grid_next_page"),   "Load next page of results",                                   { "grid" }),
-    act("[page]     Previous page",          k("grid_prev_page"),   "Load previous page of results",                               { "grid" }),
-    act("[page]     First page",             k("grid_first_page"),  "Jump to the first page",                                      { "grid" }),
-    act("[page]     Last page",              k("grid_last_page"),   "Jump to the last page",                                       { "grid" }),
 
     -- ── Analysis ──────────────────────────────────────────────────────────
     act("[analysis] Aggregate column",       k("grid_aggregate"),   "Count, sum, avg, min, max for this column",                   { "grid" }),

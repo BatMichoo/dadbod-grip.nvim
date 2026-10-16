@@ -129,7 +129,7 @@ These commands cover the normal path:
 | `:Grip users` | Opens a table in an editable grid. |
 | `:Grip SELECT * FROM users` | Runs SQL and opens the result. |
 | `:GripQuery` | Opens the query pad. |
-| `:GripExport` | Exports the current page or every matching row. |
+| `:GripExport` | Exports the shown rows or every matching row. |
 | `:GripImport` | Previews and stages CSV, TSV, or JSON rows from the clipboard or `!command`. |
 | `:GripHome` | Returns to the welcome screen. |
 

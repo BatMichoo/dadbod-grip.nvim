@@ -760,27 +760,11 @@ local function build_render(session, opts)
   local staged_count = data.count_staged(st)
   local status_parts = {}
 
-  -- Row/page info
-  if session.query_spec and session.total_rows then
-    local page_str = qmod.page_info(session.query_spec, session.total_rows)
-    -- Directional hints when result spans multiple pages
-    local spec = session.query_spec
-    local total_pages = math.max(1, math.ceil(session.total_rows / spec.page_size))
-    if total_pages > 1 then
-      local nav = {}
-      if spec.page > 1 then nav[#nav + 1] = "H←" end
-      if spec.page < total_pages then nav[#nav + 1] = "→L" end
-      page_str = page_str .. "  " .. table.concat(nav, "  ")
-    end
-    table.insert(status_parts, page_str)
-  else
-    local row_str = #st.rows .. " rows"
-    -- Safety hint: if result maxed out page_size, more data likely exists
-    if session.query_spec and #st.rows >= session.query_spec.page_size then
-      row_str = row_str .. "  →L?"
-    end
-    table.insert(status_parts, row_str)
-  end
+  -- Row count, and the cap when Grip's own TOP N may have cut the result short
+  local row_str = #st.rows .. " rows"
+  local cap = session.query_spec and session.query_spec.limit
+  if cap and #st.rows >= cap then row_str = row_str .. " (TOP " .. cap .. ")" end
+  table.insert(status_parts, row_str)
 
   local timing_str
   if session.elapsed_ms then
@@ -935,8 +919,8 @@ function M.render(bufnr, state)
   -- Update live SQL float if active
   M._update_live_sql_float(session)
 
-  -- The sticky header mirrors this render's column row; a new render (page
-  -- turn, sort, FK jump, tab view) changes it, so refresh the winbar with it.
+  -- The sticky header mirrors this render's column row; a new render (sort,
+  -- filter, FK jump, tab view) changes it, so refresh the winbar with it.
   -- Drop the cached connection mode with it: a render is rare enough to pay
   -- for the file read the RO badge needs, a CursorMoved is not.
   session._ro_mode = nil
@@ -1238,7 +1222,7 @@ function M._update_winbar(bufnr)
   -- on the session because this function runs on every CursorMoved while
   -- current_mode() reads connections.json. Two things clear the cache, and
   -- between them they cover everything that can change the answer:
-  -- M.render (requery, page turn, refresh) and M.invalidate_mode_cache,
+  -- M.render (requery, refresh) and M.invalidate_mode_cache,
   -- which connections.switch calls.
   if session._ro_mode == nil then
     session._ro_mode =
@@ -1383,10 +1367,9 @@ function M.open(state, url, query_sql, opts)
   end
   pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
 
-  -- Register session before rendering. query_spec/total_rows are optional: a
-  -- caller that already has them (init.open fetches the COUNT inside its
-  -- spinner) hands them over here so the very first render can draw
-  -- "Page 1/N (M rows)" instead of rendering twice.
+  -- Register session before rendering. query_spec is optional: a caller that
+  -- has it hands it over here so the very first render can draw the row cap
+  -- hint instead of rendering twice.
   M._sessions[bufnr] = {
     state = state,
     url = url,
@@ -1397,7 +1380,6 @@ function M.open(state, url, query_sql, opts)
     write_mode = (opts and opts.write == true) and true or false,
     pinned = false,
     query_spec = opts and opts.query_spec or nil,
-    total_rows = opts and opts.total_rows or nil,
   }
 
   -- Open in existing window (reuse_win) or a new horizontal split below
@@ -1668,16 +1650,19 @@ local function current_export_rows(session)
 end
 
 local function matching_count(session)
-  if session.total_rows ~= nil then return session.total_rows end
   if not session.query_spec then return nil, "All-row export requires a query-backed result" end
   local result, err = db.query(qmod.build_count_sql(session.query_spec), session.url)
   if not result then return nil, err or "Count query failed" end
   return tonumber(result.rows and result.rows[1] and result.rows[1][1]) or 0
 end
 
---- Prompt for page/all scope before any format prompt, then provide the rows.
+--- Provide the rows to export. Only a result Grip capped (a table opened with
+--- TOP N that filled the cap) asks whether to fetch every row instead.
 local function request_export_rows(session, destination, callback)
-  vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
+  local cap = session.query_spec and session.query_spec.limit
+  local choose = cap and #session.state.rows >= cap and vim.ui.select
+    or function(_, _, cb) cb("Shown rows") end
+  choose({ "Shown rows", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
     if not scope then return end
 
     local rows, cols, count
@@ -1702,7 +1687,7 @@ local function request_export_rows(session, destination, callback)
         return
       end
       local result, err = db.query(
-        qmod.build_sql(session.query_spec, { paginate = false }), session.url)
+        qmod.build_sql(session.query_spec, { uncapped = true }), session.url)
       if not result then
         vim.notify("Export failed: " .. tostring(err or "query failed"), vim.log.levels.ERROR)
         return
@@ -1726,7 +1711,7 @@ local function request_export_rows(session, destination, callback)
         return
       end
       if count > 10000 and not ui.confirm(string.format(
-          "Export %d rows from the current page? (y/N): ", count)) then return end
+          "Export %d rows? (y/N): ", count)) then return end
     end
 
     if count == 0 then
@@ -1811,7 +1796,7 @@ function M.export_to_clipboard(bufnr)
   end)
 end
 
---- Export a page or all matching rows to a file.
+--- Export the shown rows, or all matching rows, to a file.
 --- Called by gX keymap and :GripExport command.
 function M.do_export(bufnr)
   local session = M._sessions[bufnr]
@@ -1935,10 +1920,15 @@ end
 
 -- Per-view data fetchers. Each returns (columns, rows, err).
 local function fetch_view_columns(table_name, url, session)
-  local db_mod = require("dadbod-grip.db")
-  local cols, err = db_mod.get_column_info(table_name, url)
-  if err and not cols then return nil, nil, err end
-  if not cols then return nil, nil, "no column info returned" end
+  -- Opening a table already fetched this for conditional formatting; reuse it
+  -- rather than paying another round-trip (a new login, for sqlcmd).
+  local cols, err = session and session._column_info, nil
+  if not cols then
+    cols, err = require("dadbod-grip.db").get_column_info(table_name, url)
+    if err and not cols then return nil, nil, err end
+    if not cols then return nil, nil, "no column info returned" end
+    if session then session._column_info = cols end
+  end
   local columns = { "column_name", "data_type", "nullable", "default", "key" }
   local rows = {}
   for _, c in ipairs(cols) do
@@ -2237,6 +2227,8 @@ function M.apply_records(bufnr, state)
   if cv and cv ~= "records" then
     session.state = state
     session._records_state = state
+    -- Refreshing the Columns view is the explicit way to see a DDL change
+    if cv == "columns" then session._column_info = nil end
     M.switch_view(bufnr, cv, { force = true })
     return
   end
@@ -2340,12 +2332,10 @@ function M._fk_referencing(bufnr)
       state = session.state,
       table_name = tbl,
       cursor_pos = vim.api.nvim_win_get_cursor(0),
-      total_rows = session.total_rows,
     })
 
     -- Build query for the referencing rows
-    local page_size = session.query_spec and session.query_spec.page_size or 100
-    local ref_spec = qmod.new_table(ref.table, page_size)
+    local ref_spec = qmod.new_table(ref.table, session.query_spec and session.query_spec.limit)
     -- Pinned: this clause is what the grid IS ("the rows referencing that row"),
     -- so F/X must not drop it and the [filtered] badge must not claim the user
     -- filtered anything.
@@ -2354,7 +2344,7 @@ function M._fk_referencing(bufnr)
       { pinned = true })
     local ref_sql = qmod.build_sql(ref_spec)
 
-    -- Four round-trips (rows, columns, PKs, COUNT) behind one spinner: without
+    -- Up to three round-trips (rows, columns, PKs) behind one spinner: without
     -- it the jump is a dead editor for as long as the connection takes.
     -- One table out, never a bare `nil, err`: ui.blocking() forwards through
     -- table.unpack, which drops everything after a leading nil.
@@ -2381,13 +2371,7 @@ function M._fk_referencing(bufnr)
       res.table_name = ref.table
       res.url = session.state.url
       res.sql = ref_sql
-
-      -- Single cheap COUNT (after selection) for pagination + notify
       row_count = #res.rows
-      local count_result = db.query(qmod.build_count_sql(ref_spec), session.state.url)
-      if count_result and count_result.rows[1] then
-        row_count = tonumber(count_result.rows[1][1]) or row_count
-      end
       return { result = res }
     end)
     if not fetched or not fetched.result then
@@ -2400,7 +2384,6 @@ function M._fk_referencing(bufnr)
 
     local new_state = data.new(result)
     session.query_spec = ref_spec
-    session.total_rows = row_count
     M.render(bufnr, new_state)
     M._sync_pad(ref_spec)
     vim.notify(
@@ -2425,10 +2408,10 @@ end
 
 -- ── multi-cursor column set ───────────────────────────────────────────────
 --- Stage the same value for the current column across ALL visible rows of the
---- current page (bulk-edit a status field without SQL or a visual selection).
---- Mirror of the visual-mode batch edit (grid_v_edit) over the rendered page:
+--- visible rows (bulk-edit a status field without SQL or a visual selection).
+--- Mirror of the visual-mode batch edit (grid_v_edit) over the rendered rows:
 --- rows staged as deleted are skipped, staged INSERT rows are included, and
---- rows outside the current page are never touched.
+--- rows not shown in the grid are never touched.
 --- Module-level (not a keymap closure) so tests can drive it directly.
 function M._column_set(bufnr)
   local session = M._sessions[bufnr]
@@ -2444,7 +2427,7 @@ function M._column_set(bufnr)
   end
   local col_name = cell.col_name
 
-  -- Visible rows = exactly what the render enumerates for this page,
+  -- Visible rows = exactly what the render enumerates,
   -- minus rows already staged as deleted.
   local st = session.state
   local row_indices = {}
@@ -2745,10 +2728,7 @@ function M.show_help(opts)
       "  F         Clear all filters",
       "  gp        Load saved filter preset",
       "  gP        Save current filter as preset",
-      "  X         Reset view (clear sort/filter/page)",
-      "  L / H     Next / previous page",
-      "  ]p / [p   Next / previous page (bracket alias)",
-      "  ]P / [P   Last / first page",
+      "  X         Reset view (clear sort/filter)",
       "",
       "  FK Navigation",
       "  gf        Follow foreign key under cursor",

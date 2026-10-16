@@ -138,20 +138,19 @@ test("a failed staged-insert transaction commits no partial import", function()
   if not ok then error(err) end
 end)
 
-test("filter, sort, pagination, and requery preserve their contract", function()
+test("filter, sort, the row cap, and requery preserve their contract", function()
   local spec = query.new_table("orders", 25)
   spec = query.add_filter(spec, '"id" > 25')
   spec = query.toggle_sort(spec, "id")
-  spec = query.set_page(spec, 2)
 
-  local page = assert(db.query(query.build_sql(spec), URL))
-  eq(#page.rows, 25, "second page size")
-  eq(tonumber(page.rows[1][1]), 51, "filter + offset")
+  local capped = assert(db.query(query.build_sql(spec), URL))
+  eq(#capped.rows, 25, "row cap")
+  eq(tonumber(capped.rows[1][1]), 26, "filter + sort")
 
   local count = assert(db.query(query.build_count_sql(spec), URL))
   eq(tonumber(count.rows[1][1]), 125, "matching count")
 
-  local requery = query.set_page(query.toggle_sort(spec, "id"), 1)
+  local requery = query.toggle_sort(spec, "id")
   local reversed = assert(db.query(query.build_sql(requery), URL))
   eq(tonumber(reversed.rows[1][1]), 150, "requery applies descending sort")
 end)
@@ -159,7 +158,7 @@ end)
 test("all-row export is complete and atomically written", function()
   local spec = query.add_filter(query.new_table("orders", 25), '"id" > 25')
   spec = query.toggle_sort(spec, "id")
-  local result = assert(db.query(query.build_sql(spec, { paginate = false }), URL))
+  local result = assert(db.query(query.build_sql(spec, { uncapped = true }), URL))
   eq(#result.rows, 125, "all matching rows fetched")
 
   local path = vim.fn.tempname() .. ".csv"

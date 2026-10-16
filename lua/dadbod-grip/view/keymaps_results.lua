@@ -59,7 +59,7 @@ function M.setup(bufnr, ctx)
       if not win_id then return end  -- bufhidden=wipe: no window means already wiped
       local name = vim.api.nvim_buf_get_name(bnum)
       local short = name:match("^grip://(.+)$") or name
-      local rows = s.total_rows
+      local rows = s.state and s.state.rows and #s.state.rows
       local row_label = rows and (" [" .. rows .. " rows]") or ""
       local pin_label = s.pinned and " [pinned]" or ""
       local elapsed = s.elapsed_ms and (" " .. s.elapsed_ms .. "ms") or ""

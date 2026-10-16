@@ -114,22 +114,6 @@ test("open: opening query shows a spinner", function()
   contains(table.concat(s, "\n"), "users", "spinner names the table")
 end)
 
--- ── pagination: H / L / [p / ]p ───────────────────────────────────────────
-
-test("on_requery: next page shows a spinner", function()
-  local bufnr, session = open_grid("users")
-  take_spins()
-  session.on_requery(bufnr, qmod.next_page(session.query_spec))
-  local s = take_spins()
-  truthy(#s >= 1, "expected a spinner while loading the next page")
-end)
-
-test("on_requery: page change still lands on the requested page", function()
-  local bufnr, session = open_grid("users")
-  session.on_requery(bufnr, qmod.set_page(session.query_spec, 1))
-  assert(view._sessions[bufnr].query_spec.page == 1, "page kept")
-end)
-
 -- ── sorting: s / S ────────────────────────────────────────────────────────
 
 test("on_requery: sort shows a spinner", function()
@@ -159,31 +143,24 @@ end)
 
 -- ── one spinner per reload, not a flicker of two ──────────────────────────
 
-test("on_requery: the count query and the page query share one spinner", function()
+test("on_requery: a requery shows one spinner, not a flicker of two", function()
   local bufnr, session = open_grid("users")
   take_spins()
-  session.on_requery(bufnr, qmod.next_page(session.query_spec))
+  session.on_requery(bufnr, qmod.add_filter(session.query_spec, '"id" > 0'))
   local s = take_spins()
   assert(#s == 1, "expected exactly 1 spinner, got " .. #s .. ": " .. table.concat(s, " | "))
 end)
 
 -- ── the spinner has to stay up until the grid is ready ────────────────────
 
--- The opening SELECT was inside the float, but the primary-key lookup and the
--- pagination COUNT were not: on a remote connection the spinner vanished and
--- the editor then sat frozen through two more round-trips before the grid
--- appeared.
+-- The opening SELECT was inside the float, but the primary-key lookup was
+-- not: on a remote connection the spinner vanished and the editor then sat
+-- frozen through another round-trip before the grid appeared.
 test("open: every db round-trip happens inside the spinner", function()
   cleanup_grids()
   local naked = db_calls_outside_spinner(function() grip.open("users", url, {}) end)
   assert(#naked == 0,
     "these db calls ran with no spinner up: " .. table.concat(naked, ", "))
-end)
-
-test("open: the grid still knows the row count", function()
-  local bufnr = open_grid("users")
-  assert(view._sessions[bufnr].total_rows == 15,
-    "total_rows: expected 15, got " .. tostring(view._sessions[bufnr].total_rows))
 end)
 
 -- ── the spinner must not swallow the error ────────────────────────────────
@@ -204,7 +181,7 @@ test("on_requery: a failed query still reports the db error", function()
   db.query = function() return nil, "boom: connection refused" end
   vim.notify = function(msg) table.insert(notified, tostring(msg)) end
 
-  local ok, err = pcall(session.on_requery, bufnr, qmod.next_page(session.query_spec))
+  local ok, err = pcall(session.on_requery, bufnr, qmod.toggle_sort(session.query_spec, "id"))
 
   db.query   = real_query
   vim.notify = real_notify

@@ -604,55 +604,7 @@
     {
       "action": "grid_reset_view",
       "default": "X",
-      "description": "Clears sorting and user filters and returns to page one.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_next_page",
-      "default": "L",
-      "description": "Loads the next page.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_prev_page",
-      "default": "H",
-      "description": "Loads the previous page.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_next_page2",
-      "default": "]p",
-      "description": "Loads the next page with the bracket alias.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_prev_page2",
-      "default": "[p",
-      "description": "Loads the previous page with the bracket alias.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_last_page",
-      "default": "]P",
-      "description": "Loads the last page.",
-      "category": "grid filtering",
-      "surfaces": ["grid"],
-      "modes": ["n"]
-    },
-    {
-      "action": "grid_first_page",
-      "default": "[P",
-      "description": "Loads the first page.",
+      "description": "Clears sorting and user filters.",
       "category": "grid filtering",
       "surfaces": ["grid"],
       "modes": ["n"]

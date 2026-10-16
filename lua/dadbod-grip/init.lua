@@ -28,7 +28,7 @@ local _ag = vim.api.nvim_create_augroup("DadbodGripInit", { clear = true })
 
 -- Default options (overridden by setup)
 local OPTS = {
-  limit       = 100,
+  limit       = 1000,
   max_col_width = 40,
   timeout     = 10000,
   connections_path = nil,
@@ -421,7 +421,7 @@ end
 
 -- Decide the query spec for a given :Grip argument.
 -- Returns (spec, table_name, file_path) or (nil, err_string).
-local function resolve_query(arg, page_size, adapter_kind)
+local function resolve_query(arg, limit, adapter_kind)
   if not arg or arg == "" then
     arg = vim.fn.expand("<cword>")
   end
@@ -434,7 +434,7 @@ local function resolve_query(arg, page_size, adapter_kind)
     if arg:match("^https?://") or arg:match("^s3://") then
       -- Remote URL: pass through to DuckDB httpfs
       local file_sql = string.format("SELECT * FROM '%s'", esc(arg))
-      return query.new_raw(file_sql, page_size), nil, arg
+      return query.new_raw(file_sql, limit), nil, arg
     end
     local path = arg
     if path:sub(1, 1) == "~" then
@@ -445,7 +445,7 @@ local function resolve_query(arg, page_size, adapter_kind)
       return nil, "File not found: " .. path
     end
     local file_sql = string.format("SELECT * FROM '%s'", esc(path))
-    return query.new_raw(file_sql, page_size), nil, path
+    return query.new_raw(file_sql, limit), nil, path
   end
 
   -- Detect statement type
@@ -462,7 +462,7 @@ local function resolve_query(arg, page_size, adapter_kind)
     else
       table_name = select_editable_table(arg, adapter_kind)
     end
-    return query.new_raw(arg, page_size), table_name
+    return query.new_raw(arg), table_name
   end
   -- WITH can be a read-only CTE (SELECT) or a mutating CTE (UPDATE/DELETE/INSERT).
   -- Scan for mutation keywords to decide; default to SELECT if none found.
@@ -472,7 +472,7 @@ local function resolve_query(arg, page_size, adapter_kind)
         or stripped:find("%f[%u]INSERT%f[^%u]") then
       return nil, nil, nil, arg
     end
-    return query.new_raw(arg, page_size), nil
+    return query.new_raw(arg), nil
   end
   -- REPLACE INTO (MySQL/SQLite): route through mutation preview like INSERT
   if upper == "REPLACE" then
@@ -485,7 +485,7 @@ local function resolve_query(arg, page_size, adapter_kind)
     return nil, nil, nil, arg  -- 4th return = mutation SQL
   end
   -- Otherwise treat as table name
-  return query.new_table(arg, page_size), arg
+  return query.new_table(arg, limit), arg
 end
 
 -- ── file write-back ───────────────────────────────────────────────────────
@@ -1269,18 +1269,12 @@ function M.open(arg, url, opts)
       or table_name_arg and (table_name_arg:match("[^.]+$") or table_name_arg)
       or "result"
   short_label = (short_label:match("^([^\n]+)") or "query"):sub(1, 50)
-  -- Opening a table is three round-trips: the SELECT, the primary keys, and the
-  -- pagination COUNT. All three run under one spinner. With only the SELECT
-  -- covered, the float vanished and the editor then froze through the other two
-  -- before the grid ever appeared -- which reads as the plugin hanging.
-  local fetched, total_rows
+  -- Opening a table is the SELECT (plus the primary keys, for editing) and
+  -- nothing else: no COUNT(*) and no column-type lookup, each of which is one
+  -- more round-trip -- a whole login, for sqlcmd.
+  local fetched
   ui.blocking("  querying " .. short_label .. "...", function()
     fetched = fetch_refresh(conn, query_sql, table_name_arg)
-    if not fetched.result then return end
-    local count_result = db.query(query.build_count_sql(spec), conn)
-    if count_result and count_result.rows[1] then
-      total_rows = tonumber(count_result.rows[1][1]) or 0
-    end
   end)
 
   local result = fetched.result
@@ -1297,19 +1291,18 @@ function M.open(arg, url, opts)
   local state = data.new(result)
 
   -- Open the view
-  -- query_spec/total_rows go in up front so the first render already draws the
-  -- page counter; without them the grid had to be rendered a second time.
+  -- query_spec goes in up front so the first render already draws the row cap
+  -- hint; without it the grid had to be rendered a second time.
   local view_opts = vim.tbl_extend("force", {
     max_col_width = OPTS.max_col_width,
     elapsed_ms    = elapsed_ms,
     query_spec    = spec,
-    total_rows    = total_rows,
   }, opts or {})
   local bufnr = view.open(state, conn, query_sql, view_opts)
 
   -- Auto-sync query pad with the current grid query (passive background update).
   -- Use the clean original SQL (base_sql or table name) so the pad shows what the
-  -- user wrote, not the internal pagination wrapper (SELECT * FROM (...) AS _grip ...).
+  -- user wrote, not the internal sort/filter wrapper (SELECT * FROM (...) AS _grip ...).
   -- Skip when the query originated from the pad itself (from_pad=true): the SQL is
   -- already there and we must not clobber the user's buffer.
   vim.schedule(function()
@@ -1317,28 +1310,14 @@ function M.open(arg, url, opts)
     require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec))
   end)
 
-  -- Store query spec and run initial count for pagination
+  -- Store the query spec on the session
   local session = view._sessions[bufnr]
   if session then
     -- For file-as-table, store the file path so the schema sidebar can show columns
     if file_path then session.file_path = file_path end
-    -- Both were handed to view.open() above and are already on the session; the
-    -- assignments stay so a caller that reuses an existing buffer still gets them.
+    -- Handed to view.open() above and already on the session; the assignment
+    -- stays so a caller that reuses an existing buffer still gets it.
     session.query_spec = spec
-    session.total_rows = total_rows
-    -- Auto-fetch column info for conditional formatting
-    if table_name_arg and not session._column_info then
-      vim.schedule(function()
-        local s = view._sessions[bufnr]
-        if s and not s._column_info then
-          local info = db.get_column_info(table_name_arg, conn)
-          if info then
-            s._column_info = info
-            M._render_if_visible(bufnr)
-          end
-        end
-      end)
-    end
   end
 
   -- Wire callbacks
@@ -1355,33 +1334,16 @@ function M.open(arg, url, opts)
       local s = view._sessions[bid]
       if not s then return end
 
-      -- Sort / filter / page changes are two round-trips (COUNT then the page
-      -- itself). Both run inside one spinner: do_refresh's own float would
-      -- otherwise only cover the second, leaving the COUNT looking like a hang.
-      local new_sql, page_fetch
+      -- Sort and filter changes rerun the query, and nothing else
+      local new_sql, fetched_q
       ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
-        -- Run count query for pagination
-        local count_sql = query.build_count_sql(new_spec)
-        local count_result = db.query(count_sql, conn)
-        if count_result and count_result.rows[1] then
-          s.total_rows = tonumber(count_result.rows[1][1]) or 0
-        end
-
-        -- Clamp page to valid range
-        if s.total_rows then
-          local total_pages = math.max(1, math.ceil(s.total_rows / new_spec.page_size))
-          if new_spec.page > total_pages then
-            new_spec = query.set_page(new_spec, total_pages)
-          end
-        end
-
         new_sql = query.build_sql(new_spec)
-        page_fetch = fetch_refresh(conn, new_sql, table_name_arg)
+        fetched_q = fetch_refresh(conn, new_sql, table_name_arg)
       end)
 
       s.query_spec = new_spec
       s.query_sql = new_sql
-      apply_refresh(bid, page_fetch)
+      apply_refresh(bid, fetched_q)
     end,
     on_apply = function(bid)
       do_apply(bid, conn)
@@ -1874,7 +1836,7 @@ end
 -- ── setup ─────────────────────────────────────────────────────────────────
 
 ---@class DadbodGripOpts
----@field limit? integer         Rows per page (default: 100)
+---@field limit? integer         Row cap when Grip opens a table or file (TOP N; default 1000, 0 = none)
 ---@field max_col_width? integer Max display width per column (default: 40)
 ---@field timeout? integer       Query timeout in ms (default: 10000)
 ---@field keymaps? table         Key overrides: { action_name = "key" } or { action_name = false }
@@ -1912,7 +1874,7 @@ function M.setup(opts)
       return v == nil or (type(v) == "number" and v >= 0 and v <= 8000 and v % 1 == 0)
     end, "integer from 0 to 8000, or nil" },
   })
-  OPTS.limit        = opts.limit        or 100
+  OPTS.limit        = opts.limit        or 1000
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
   OPTS.connections_path = opts.connections_path or nil

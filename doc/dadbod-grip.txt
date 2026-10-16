@@ -14,7 +14,7 @@ CONTENTS                                                    *grip-contents*
   5. Commands .................. |grip-commands|
   6. Keybindings ............... |grip-keybindings|
   7. Editing ................... |grip-editing|
-  8. Sort, Filter, Paginate .... |grip-sort-filter|
+  8. Sort and Filter .......... |grip-sort-filter|
   9. Foreign Key Navigation .... |grip-fk-nav|
   10. Schema Browser ........... |grip-schema|
   11. Query Pad ................ |grip-query-pad|
@@ -115,7 +115,7 @@ packer.nvim: >lua
 setup() is called automatically by the plugin loader with sensible defaults.
 Override if needed: >lua
   require("dadbod-grip").setup({
-    limit            = 100,
+    limit            = 1000,
     max_col_width    = 40,
     timeout          = 10000,
     connections_path = nil,
@@ -258,9 +258,6 @@ Action names (stable API) with their defaults:
   grid_filter_build= "gF"      grid_filter_where= "<C-f>"
   grid_filter_clear= "F"       grid_preset_load = "gp"
   grid_preset_save = "gP"      grid_reset_view  = "X"
-  grid_next_page   = "L"       grid_prev_page   = "H"
-  grid_next_page2  = "]p"      grid_prev_page2  = "[p"
-  grid_last_page   = "]P"      grid_first_page  = "[P"
 
   Grid: inspection / analysis ~
   grid_explain_cell= "ge"      grid_json_tree   = "gK"
@@ -539,9 +536,8 @@ EDITING ~
   x               Set cell to NULL
   gU              Set column value for all visible rows (normal mode)
                   Opens the cell editor once and stages the same value for
-                  every row on the current page: rows staged as deleted are
-                  skipped, staged INSERT rows are included, and rows on
-                  other pages are never touched. Saving an empty value (or
+                  every row in the grid: rows staged as deleted are
+                  skipped, and staged INSERT rows are included. Saving an empty value (or
                   the NULL sentinel) stages NULL. Asks for confirmation
                   when more than 50 rows are visible.
   p               Paste clipboard value into cell
@@ -560,9 +556,9 @@ BATCH EDITING (visual mode) ~
   y               Yank selected cells in column (newline-separated)
 
 From normal mode, `gU` performs the same batch edit over all visible rows
-of the current page without needing a visual selection. See |grip-editing|.
+without needing a visual selection. See |grip-editing|.
 
-SORT / FILTER / PAGINATION ~
+SORT / FILTER ~
                                                        *grip-sort-filter*
   s               Toggle sort on column (ASC then DESC then off)
   S               Stack secondary sort on column
@@ -573,10 +569,7 @@ SORT / FILTER / PAGINATION ~
   F               Clear the filters you applied
   gp              Load saved filter preset for current table
   gP              Save current filter as named preset
-  X               Reset view (clear sort, your filters, and page)
-  H / L           Previous / next page
-  ]p / [p         Previous / next page (alternate)
-  ]P / [P         Last / first page
+  X               Reset view (clear sort and your filters)
 
 FK NAVIGATION ~
                                                             *grip-fk-nav*
@@ -788,7 +781,7 @@ documents with 20 or fewer leaves open fully expanded.
 into that column's JSON value. Non-JSON cells notify "Not a JSON cell".
 
 ==============================================================================
-8. SORT, FILTER, PAGINATE                           *grip-sort-filter-page*
+8. SORT, FILTER                                     *grip-sort-filter-page*
 
 Sort ~
 Press `s` on a column header to cycle through ASC, DESC, and off. The
@@ -814,12 +807,18 @@ Press `gP` to save the current active filters as a named preset for the
 current table. Presets are stored in `.grip/filters.json` keyed by table
 name. Press `gp` to load a saved preset using the grip_picker float.
 
-Paginate ~
-Results are paginated (default 100 rows per page). The status line shows
-the current page and total. Press `H`/`L` to navigate pages (or `]p`/`[p`),
-or `]P`/`[P` to jump to the last/first page.
+Rows ~
+There is no pagination. SQL you write runs exactly as written, so your own
+TOP or LIMIT decides how many rows come back. When Grip writes the SQL itself
+-- opening a table from the sidebar or picker, or a file -- it asks for the
+first `limit` rows (default 1000; 0 = no cap), as SSMS's "Select Top N Rows"
+does, and the status line shows `(TOP N)` when the result may be cut short.
+Opening a table runs only that SELECT: no COUNT(*) and no column-type lookup.
 
-Press `X` to reset all sort, filter, and pagination state at once.
+Column types (bit-as-boolean and past-date colours, the `T` type row) load
+when first needed: the Columns view or folder, or `T`.
+
+Press `X` to reset all sort and filter state at once.
 
 ==============================================================================
 9. FOREIGN KEY NAVIGATION                               *grip-fk-nav-full*
@@ -1254,8 +1253,9 @@ always behaved.
 ==============================================================================
 14. EXPORT                                                   *grip-export*
 
-Press `gE` in a grid and first choose Current page or All matching rows,
-then choose one of six clipboard formats:
+Press `gE` in a grid and choose one of six clipboard formats. A grid cut
+short by Grip's TOP N cap first asks whether to export the shown rows or all
+matching rows:
 
   CSV .............. RFC 4180 compliant, quoted fields
   TSV .............. Tab-separated values
@@ -1264,14 +1264,14 @@ then choose one of six clipboard formats:
   Markdown ......... GitHub-flavored markdown table
   Grip Table ....... Box-drawing table matching the grid style
 
-All-row export preserves filters and sorting while removing pagination.
+All-row export preserves filters and sorting while removing the cap.
 Clipboard exports are capped at 100,000 rows; use a file above that.
 
 Export to file ~                                              *:GripExport*
 :GripExport
-Press `gX` or run `:GripExport`, choose Current page or All matching rows,
-then choose csv, json, or sql and a destination. All-row export keeps active
-filters and sorting and removes only pagination. Exports above 10,000 rows
+Press `gX` or run `:GripExport` (a capped grid first asks for shown or all
+matching rows), then choose csv, json, or sql and a destination. All-row
+export keeps active filters and sorting and removes only the cap. Exports above 10,000 rows
 require confirmation.
 
 The file is streamed to a same-directory temporary path and atomically
@@ -1390,7 +1390,8 @@ grip.setup({opts})
   the plugin loader.
 
   Parameters:
-    limit         (number)  Default row limit. Default: 100
+    limit         (number)  Row cap when Grip opens a table or file (TOP N).
+                            0 = no cap. Default: 1000
     max_col_width (number)  Max display width per column. Default: 40
     timeout       (number)  Query timeout in ms. Default: 10000
     sticky_header (boolean) Column names in the winbar. Default: true

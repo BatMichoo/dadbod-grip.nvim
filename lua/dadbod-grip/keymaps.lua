@@ -141,13 +141,7 @@ add("grid filtering", grid, normal, {
   { "grid_filter_clear", "F", "Clears user filters while preserving pinned context." },
   { "grid_preset_load", "gp", "Loads a saved filter preset." },
   { "grid_preset_save", "gP", "Saves the current filters as a preset." },
-  { "grid_reset_view", "X", "Clears sorting and user filters and returns to page one." },
-  { "grid_next_page", "L", "Loads the next page." },
-  { "grid_prev_page", "H", "Loads the previous page." },
-  { "grid_next_page2", "]p", "Loads the next page with the bracket alias." },
-  { "grid_prev_page2", "[p", "Loads the previous page with the bracket alias." },
-  { "grid_last_page", "]P", "Loads the last page." },
-  { "grid_first_page", "[P", "Loads the first page." },
+  { "grid_reset_view", "X", "Clears sorting and user filters." },
 })
 
 add("grid inspection", grid, normal, {

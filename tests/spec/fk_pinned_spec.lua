@@ -81,7 +81,6 @@ local function requery(bufnr, new_spec)
   result.url = url
   result.sql = sql_str
   session.query_spec = new_spec
-  session.total_rows = #result.rows
   view.render(bufnr, data.new(result))
 end
 

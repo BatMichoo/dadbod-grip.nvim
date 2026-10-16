@@ -217,16 +217,14 @@ test("write_export_file failure preserves destination and removes partial temp",
   vim.fn.delete(path)
 end)
 
-test("clipboard export prompts scope before format and removes only pagination", function()
+test("a capped grid prompts scope before format and drops only the cap", function()
   local bufnr = 99123
-  local spec = query.new_table("users", 100)
+  local spec = query.new_table("users", 1)
   spec = query.add_filter(spec, '"active" = true')
   spec = query.toggle_sort(spec, "name")
-  spec = query.set_page(spec, 2)
   view._sessions[bufnr] = {
-    state = { columns = { "id", "name" }, rows = { { "page", "row" } }, table_name = "users" },
+    state = { columns = { "id", "name" }, rows = { { "shown", "row" } }, table_name = "users" },
     query_spec = spec,
-    total_rows = 2,
     url = "sqlite:test.db",
   }
 
@@ -237,6 +235,7 @@ test("clipboard export prompts scope before format and removes only pagination",
     callback(opts.prompt == "Export scope:" and "All matching rows" or "CSV")
   end
   db.query = function(sql)
+    if sql:find("COUNT%(%*%)") then return { columns = { "n" }, rows = { { "2" } } } end
     sent_sql = sql
     return { columns = { "id", "name" }, rows = { { "1", "Alice" }, { "2", "Bob" } } }
   end
@@ -249,22 +248,42 @@ test("clipboard export prompts scope before format and removes only pagination",
   eq(prompts[2], "Export format:", "format is second")
   contains(sent_sql, 'WHERE ("active" = true)', "filter kept")
   contains(sent_sql, 'ORDER BY "name" ASC', "sort kept")
-  not_contains(sent_sql, "LIMIT", "pagination removed")
-  not_contains(sent_sql, "OFFSET", "page offset removed")
+  not_contains(sent_sql, "LIMIT", "cap removed")
+end)
+
+test("an uncapped grid exports its rows without asking for scope", function()
+  local bufnr = 99125
+  view._sessions[bufnr] = {
+    state = { columns = { "id" }, rows = { { "1" }, { "2" } }, table_name = "users" },
+    query_spec = query.new_raw("SELECT * FROM users"), url = "sqlite:test.db",
+  }
+  local prompts, queried = {}, false
+  local orig_select, orig_query = vim.ui.select, db.query
+  vim.ui.select = function(_, opts, callback) prompts[#prompts + 1] = opts.prompt; callback("CSV") end
+  db.query = function() queried = true; return nil, "must not run" end
+  local ok, err = pcall(view.export_to_clipboard, bufnr)
+  vim.ui.select, db.query = orig_select, orig_query
+  view._sessions[bufnr] = nil
+  if not ok then error(err) end
+  eq(prompts[1], "Export format:", "no scope prompt")
+  eq(queried, false, "shown rows need no query")
 end)
 
 test("clipboard all-row export refuses more than 100000 rows before querying", function()
   local bufnr = 99124
   view._sessions[bufnr] = {
     state = { columns = { "id" }, rows = { { "1" } }, table_name = "users" },
-    query_spec = query.new_table("users", 100), total_rows = 100001, url = "sqlite:test.db",
+    query_spec = query.new_table("users", 1), url = "sqlite:test.db",
   }
   local queried, notified = false, nil
   local orig_select, orig_query, orig_notify = vim.ui.select, db.query, vim.notify
   vim.ui.select = function(_, opts, callback)
     callback(opts.prompt == "Export scope:" and "All matching rows" or "CSV")
   end
-  db.query = function() queried = true; return nil, "must not run" end
+  db.query = function(sql)
+    if sql:find("COUNT%(%*%)") then return { columns = { "n" }, rows = { { "100001" } } } end
+    queried = true; return nil, "must not run"
+  end
   vim.notify = function(msg) notified = msg end
   local ok, err = pcall(view.export_to_clipboard, bufnr)
   vim.ui.select, db.query, vim.notify = orig_select, orig_query, orig_notify
@@ -277,12 +296,15 @@ end)
 test("all-row export above 10000 requires confirmation before querying", function()
   local session = {
     state = { columns = { "id" }, rows = { { "1" } } },
-    query_spec = query.new_table("users", 100), total_rows = 10001, url = "sqlite:test.db",
+    query_spec = query.new_table("users", 1), url = "sqlite:test.db",
   }
   local queried, delivered = false, false
   local orig_select, orig_query, orig_confirm = vim.ui.select, db.query, ui.confirm
   vim.ui.select = function(_, _, callback) callback("All matching rows") end
-  db.query = function() queried = true; return { columns = {}, rows = {} } end
+  db.query = function(sql)
+    if sql:find("COUNT%(%*%)") then return { columns = { "n" }, rows = { { "10001" } } } end
+    queried = true; return { columns = {}, rows = {} }
+  end
   ui.confirm = function() return false end
   local ok, err = pcall(view._request_export_rows, session, "file", function() delivered = true end)
   vim.ui.select, db.query, ui.confirm = orig_select, orig_query, orig_confirm

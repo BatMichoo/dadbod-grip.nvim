@@ -38,7 +38,7 @@ local function measure(resolve, sql, count)
   local start = vim.uv.hrtime()
   for _ = 1, count do
     local spec, table_name, _, mutation = resolve(sql, 100, "postgresql")
-    sink = sink + (spec and spec.page_size or 0) + (table_name and #table_name or 0)
+    sink = sink + (spec and spec.limit or 0) + (table_name and #table_name or 0)
       + (mutation and #mutation or 0)
   end
   return (vim.uv.hrtime() - start) / count / 1000

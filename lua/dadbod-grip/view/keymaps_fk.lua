@@ -65,13 +65,12 @@ function M.setup(bufnr, ctx)
       state = session_fk.state,
       table_name = tbl,
       cursor_pos = vim.api.nvim_win_get_cursor(0),
-      total_rows = session_fk.total_rows,
     })
 
     -- Build query for referenced row. The clause is pinned: it is the identity of
     -- the grid we are jumping to, not a filter the user applied, so F/X must not
     -- drop it and the [filtered] badge must not claim otherwise.
-    local ref_spec = qmod.new_table(fk_info.ref_table, session_fk.query_spec.page_size)
+    local ref_spec = qmod.new_table(fk_info.ref_table, session_fk.query_spec.limit)
     ref_spec = qmod.add_filter(ref_spec,
       sql.quote_ident(fk_info.ref_column) .. " = " .. sql.quote_value(cell.value),
       { pinned = true })
@@ -115,7 +114,6 @@ function M.setup(bufnr, ctx)
 
     local new_state = data.new(result)
     session_fk.query_spec = ref_spec
-    session_fk.total_rows = #result.rows
     view.render(bufnr, new_state)
     view._sync_pad(ref_spec)
     vim.notify(tbl .. "." .. cell.col_name .. " → " .. fk_info.ref_table, vim.log.levels.INFO)
@@ -136,7 +134,6 @@ function M.setup(bufnr, ctx)
     end
     local frame = table.remove(session_nav.nav_stack)
     session_nav.query_spec = frame.query_spec
-    session_nav.total_rows = frame.total_rows
     view.render(bufnr, frame.state)
     view._sync_pad(frame.query_spec)
     -- Restore cursor

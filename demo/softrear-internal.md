@@ -167,7 +167,7 @@ under embargo.
 > Press `gQ` to inspect the query plan and confirm the join indexes are used.
 > Press `gf` on any FK column to follow it interactively to its referenced table,
 > or `gm` on a referenced row to open the rows that point back to it. Press `gE`
-> to export the current page or every matching row.
+> to export the shown rows.
 
 ---
 

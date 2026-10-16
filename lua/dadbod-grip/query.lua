@@ -17,30 +17,31 @@ end
 
 -- ── constructors ─────────────────────────────────────────────────────────
 
---- Create a spec for a table query.
-function M.new_table(table_name, page_size)
+--- Create a spec for a table query. `limit` caps the rows Grip asks for, as
+--- SSMS's "Select Top N Rows" does; nil or 0 asks for every row.
+function M.new_table(table_name, limit)
   return {
     table_name = table_name,
     base_sql   = nil,
     sorts      = {},
     filters    = {},
-    page       = 1,
-    page_size  = page_size or 100,
+    limit      = (limit and limit > 0) and limit or nil,
     is_raw     = false,
   }
 end
 
---- Create a spec for a raw SELECT/WITH query.
-function M.new_raw(sql_str, page_size)
-  -- Strip trailing semicolons: raw SQL gets wrapped in a subquery
+--- Create a spec for a raw SELECT/WITH query. It runs exactly as written: the
+--- user's SQL decides how many rows come back. `limit` is only for SQL Grip
+--- writes itself (opening a file), which gets the same cap as a table.
+function M.new_raw(sql_str, limit)
+  -- Strip trailing semicolons: sorting or filtering wraps it in a subquery
   local cleaned = sql_str and sql_str:gsub(";%s*$", "") or sql_str
   return {
     table_name = nil,
     base_sql   = cleaned,
     sorts      = {},
     filters    = {},
-    page       = 1,
-    page_size  = page_size or 100,
+    limit      = (limit and limit > 0) and limit or nil,
     is_raw     = true,
   }
 end
@@ -51,7 +52,6 @@ end
 --- Cycles: off → ASC → DESC → off.
 function M.toggle_sort(spec, column)
   local new = deep_copy(spec)
-  new.page = 1
   for i, s in ipairs(new.sorts) do
     if s.column == column then
       if s.dir == "ASC" then
@@ -70,7 +70,6 @@ end
 --- Add/toggle secondary sort (stacked).
 function M.add_sort(spec, column)
   local new = deep_copy(spec)
-  new.page = 1
   for i, s in ipairs(new.sorts) do
     if s.column == column then
       if s.dir == "ASC" then
@@ -89,7 +88,6 @@ end
 function M.clear_sorts(spec)
   local new = deep_copy(spec)
   new.sorts = {}
-  new.page = 1
   return new
 end
 
@@ -118,7 +116,6 @@ end
 --- show up in clean_sql. See the pinned-filter block in tests/spec/query_spec.lua.
 function M.add_filter(spec, clause, opts)
   local new = deep_copy(spec)
-  new.page = 1
   local entry = { clause = clause }
   if opts and opts.pinned then entry.pinned = true end
   table.insert(new.filters, entry)
@@ -211,7 +208,6 @@ end
 function M.clear_filters(spec)
   local new = deep_copy(spec)
   new.filters = pinned_filters(new)
-  new.page = 1
   return new
 end
 
@@ -250,43 +246,16 @@ function M.set_filters(spec, clause)
   local new = deep_copy(spec)
   new.filters = pinned_filters(new)
   table.insert(new.filters, { clause = clause })
-  new.page = 1
   return new
 end
 
---- Reset all modifiers: clear sorts and user filters, page back to 1.
+--- Reset all modifiers: clear sorts and user filters.
 --- Pinned filters survive, same rationale as clear_filters.
 function M.reset(spec)
   local new = deep_copy(spec)
   new.sorts = {}
   new.filters = pinned_filters(new)
-  new.page = 1
   return new
-end
-
--- ── pagination modifiers ─────────────────────────────────────────────────
-
-function M.set_page(spec, page)
-  local new = deep_copy(spec)
-  new.page = math.max(1, page)
-  return new
-end
-
-function M.next_page(spec)
-  return M.set_page(spec, spec.page + 1)
-end
-
-function M.prev_page(spec)
-  return M.set_page(spec, spec.page - 1)
-end
-
---- Page info string for status line.
-function M.page_info(spec, total_rows)
-  if total_rows then
-    local total_pages = math.max(1, math.ceil(total_rows / spec.page_size))
-    return string.format("Page %d/%d (%d rows)", spec.page, total_pages, total_rows)
-  end
-  return string.format("Page %d", spec.page)
 end
 
 -- ── SQL composition ──────────────────────────────────────────────────────
@@ -301,10 +270,14 @@ local function where_clause(filters)
   return "WHERE " .. table.concat(parts, " AND ")
 end
 
---- Build the data query SQL from a spec. opts.paginate=false preserves the
---- active filters and sorts but omits LIMIT/OFFSET (used by all-row export).
+--- Build the data query SQL from a spec. Raw SQL with no sort or filter is
+--- returned as written. opts.uncapped=true keeps the filters and sorts but
+--- drops a table's LIMIT (used by all-row export).
 function M.build_sql(spec, opts)
   local parts = {}
+  if spec.is_raw and #spec.sorts == 0 and #spec.filters == 0 and not spec.limit then
+    return spec.base_sql
+  end
 
   -- FROM clause
   local from
@@ -329,18 +302,15 @@ function M.build_sql(spec, opts)
     table.insert(parts, "ORDER BY " .. table.concat(order_parts, ", "))
   end
 
-  -- LIMIT / OFFSET
-  if not opts or opts.paginate ~= false then
-    table.insert(parts, "LIMIT " .. spec.page_size)
-    if spec.page > 1 then
-      table.insert(parts, "OFFSET " .. ((spec.page - 1) * spec.page_size))
-    end
+  -- The table cap; each adapter translates LIMIT to its dialect (TOP/FETCH)
+  if spec.limit and not (opts and opts.uncapped) then
+    table.insert(parts, "LIMIT " .. spec.limit)
   end
 
   return table.concat(parts, " ")
 end
 
---- Build COUNT query (for pagination total).
+--- Build COUNT query: every row the spec's filters match (all-row export).
 function M.build_count_sql(spec)
   local parts = {}
   local from

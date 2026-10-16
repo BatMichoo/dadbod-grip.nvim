@@ -105,7 +105,7 @@ INSERT INTO products (id, name, price, category) VALUES
   (20, 'Starter Kit',   59.99,  'kits');
 
 -- ── orders ───────────────────────────────────────────────────────────────
--- FK to users. 150 rows for pagination testing (page_size=100 → 2 pages).
+-- FK to users. 150 rows, more than a 100-row cap.
 CREATE TABLE orders (
   id         INTEGER PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id),

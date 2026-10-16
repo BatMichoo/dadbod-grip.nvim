@@ -94,10 +94,7 @@ The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim moti
 | `F` | Clear the filters you applied (an FK-navigation scope is kept) |
 | `gp` | Load saved filter preset |
 | `gP` | Save current filter as preset (an FK-navigation scope is never saved) |
-| `X` | Reset view (clear sort + your filters + page) |
-| `H` / `L` | Previous / next page |
-| `[p` / `]p` | Previous / next page (bracket alias) |
-| `[P` / `]P` | First / last page |
+| `X` | Reset view (clear sort + your filters) |
 
 ### FK Navigation
 | Key | Action |
