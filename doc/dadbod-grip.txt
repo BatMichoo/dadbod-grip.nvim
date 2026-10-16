@@ -908,7 +908,10 @@ to scanning each table's foreign keys once.
 Toggle with `:GripSchema` or `gb` from a grid or query-pad buffer. Opens a
 left sidebar showing tables, views, functions, and procedures for the current
 connection. When the adapter supplies schema metadata, schemas start collapsed.
-Adapters without schema metadata keep their flat sections.
+Objects without schema metadata keep their flat sections, even when other
+objects have known schemas. Missing metadata does not assign an object to
+public or main. PostgreSQL objects always belong to a schema; an unqualified
+display name does not mean the object has no schema.
 
 PostgreSQL declarative partitions appear once beneath their actual parent in a
 separate Partitions group. Nested partitions retain their hierarchy, and
@@ -923,7 +926,7 @@ Schema browser keymaps:
   <S-CR>          Open table in new split
   l / zo          Expand group or table columns
   h / zc          Collapse item, or move to its parent
-  L               Expand schema/partition groups without loading columns
+  L               Expand every schema/partition level; keep existing columns
   H               Collapse all groups and table columns
   /               Search hidden names and routine identity signatures
   n / N           Jump to next / previous visible table or routine
@@ -942,6 +945,11 @@ Schema browser keymaps:
   +               Create new table (interactive designer)
   <Esc>           Close sidebar
   ?               Toggle help popup
+
+L and H apply to the whole sidebar. During filtering they change only the
+temporary matching tree. Press F, then L or H, to apply them to the complete
+catalog. Flat root objects remain visible because they have no schema group
+to collapse. Use l/zo on an individual table to load its columns.
 
 Search temporarily reveals matching paths without changing the saved folds.
 Editing a filter keeps the original pre-search view; cancelling leaves the

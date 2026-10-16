@@ -231,7 +231,7 @@ add("sidebar", sidebar, normal, {
   { "sidebar_collapse", "h", "Collapses the item or moves to its parent." },
   { "sidebar_expand_z", "zo", "Expands the group or table columns with the fold-style key." },
   { "sidebar_collap_z", "zc", "Collapses the item or moves to its parent with the fold-style key." },
-  { "sidebar_expand_all", "L", "Expands schema and partition groups without loading columns." },
+  { "sidebar_expand_all", "L", "Expands every schema and partition level without loading columns." },
   { "sidebar_collap_all", "H", "Collapses all groups and table columns." },
   { "sidebar_filter", "/", "Searches hidden objects by name or routine signature." },
   { "sidebar_filter_c", "F", "Clears the sidebar filter and restores the original view." },

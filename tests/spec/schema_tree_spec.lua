@@ -162,5 +162,43 @@ test("routine-only schemas group and mixed legacy DuckDB objects use the default
   assert(find(schema._build_nodes(st),"table","plain"),"default-schema qualified search lost a legacy object")
 end)
 
+test("partial metadata keeps unknown objects flat without inventing schema ownership",function()
+  local st=state({
+    {name="unknown_table",type="table"},{name="unknown_view",type="view",schema=""},
+    {name="public_table",type="table",schema="public",relation_name="public_table"},
+    {name="metrics.events",type="table",schema="metrics",relation_name="events",relation_id="1",relation_kind="p"},
+    {name="unknown_child",type="table",relation_name="unknown_child",relation_id="2",relation_kind="r",is_partition=true,parent_id="1"},
+  },{
+    {name="calc",display="calc(value text)",type="function",source_id="101"},
+    {name="run",display="run(value integer)",type="procedure",source_id="102"},
+    {name="tools.known",schema="tools",type="function",source_id="103"},
+  })
+  local nodes=schema._build_nodes(st)
+  assert(find(nodes,"table","unknown_table") and find(nodes,"table","unknown_view"),"unknown tables were hidden by invented schema folds")
+  assert(find(nodes,"routine","calc") and find(nodes,"routine","run"))
+  assert(not find(nodes,"schema","main") and not find(nodes,"schema",""),"invented/empty schema group")
+  for _,id in ipairs(require("dadbod-grip.schema_tree").containers(st)) do st.groups_expanded[id]=true end
+  nodes=schema._build_nodes(st)
+  assert(find(nodes,"table","unknown_child").display=="unknown_child")
+  assert(find(nodes,"table","public_table") and find(nodes,"table","metrics.events"))
+  st.filter="main.unknown_table"
+  assert(#schema._build_nodes(st)==0,"search manufactured a schema qualification")
+  st.filter="unknown_child"
+  assert(find(schema._build_nodes(st),"table","metrics.events"),"known parent edge was lost with missing child schema")
+end)
+
+test("explicitly blank schema metadata stays unknown even with a proven adapter default",function()
+  local st=state({{name="unknown",type="table",schema=""},{name="implicit_main",type="table"},
+    {name="analytics.events",type="table",schema="analytics"}})
+  st.default_schema="main"
+  local nodes=schema._build_nodes(st)
+  assert(find(nodes,"table","unknown"),"explicit blank schema was hidden under main")
+  assert(find(nodes,"schema","main"),"DuckDB's deliberate omission lost its known main schema")
+  st.filter="main.unknown"
+  assert(#schema._build_nodes(st)==0,"explicit blank schema became an invented search qualifier")
+  st.filter="main.implicit_main"
+  assert(find(schema._build_nodes(st),"table","implicit_main"))
+end)
+
 print(string.format("schema_tree_spec: %d passed, %d failed",pass,fail))
 if fail>0 then os.exit(1) end

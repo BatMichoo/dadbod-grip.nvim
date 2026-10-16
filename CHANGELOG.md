@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The schema browser groups tables, views, functions, and procedures under
   collapsed schemas when schema metadata is available. PostgreSQL partitions
   appear beneath their actual parents, including nested and cross-schema
-  partitions. Search finds hidden objects and routine signatures, then restores
+  partitions. Objects with unknown schema metadata remain in flat sections.
+  Search finds hidden objects and routine signatures, then restores
   the previous folds and view when cleared.
 
 ### Changed

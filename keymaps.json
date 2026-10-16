@@ -1058,7 +1058,7 @@
     {
       "action": "sidebar_expand_all",
       "default": "L",
-      "description": "Expands schema and partition groups without loading columns.",
+      "description": "Expands every schema and partition level without loading columns.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]

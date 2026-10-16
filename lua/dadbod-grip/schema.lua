@@ -101,7 +101,9 @@ local function fetch_tables(state)
   state.items = tables
   local routines = db.list_routines(state.url)
   state.routines = routines or {}
-  state.default_schema = require("dadbod-grip.adapters").kind(state.url) == "postgresql" and "public" or "main"
+  -- DuckDB's adapter deliberately omits .schema for its known main-schema rows.
+  -- Other missing metadata conveys no ownership, including bare PostgreSQL names.
+  state.default_schema = require("dadbod-grip.adapters").kind(db.resolved_url(state.url)) == "duckdb" and "main" or nil
   require("dadbod-grip.schema_tree").prune(state)
 end
 
@@ -480,7 +482,8 @@ local function setup_keymaps(url)
     elseif node.kind == "column" then
       columns()[node.is_file and "__file__" or node.table_name] = false
     else
-      -- A closed item moves to its nearest actionable ancestor.
+      -- A root has no ancestor; collapsing it must not jump to another object.
+      if not anchor.ids[2] then return end
       table.remove(anchor.ids, 1)
       anchor.view.col, anchor.view.leftcol, anchor.view.curswant, anchor.view.coladd = 0, 0, 0, 0
     end
@@ -789,7 +792,7 @@ local function setup_keymaps(url)
       "  S-CR      Open table in new split",
       "  l / zo    Expand group or table columns",
       "  h / zc    Collapse / move to parent",
-      "  L         Expand schema/partition groups",
+      "  L         Expand all schema/partition levels",
       "  H         Collapse groups and columns",
       "  /         Search hidden names/signatures",
       "  F         Clear filter, restore view",

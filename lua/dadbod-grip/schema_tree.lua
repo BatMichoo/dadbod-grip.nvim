@@ -5,6 +5,9 @@ local TITLES = {table = "Tables", view = "Views", ["function"] = "Functions", pr
 
 local function schema_id(name) return "schema\0" .. name end
 local function partition_id(id) return "partitions\0" .. id end
+local function schema_name(value)
+  return type(value) == "string" and value ~= "" and value or nil
+end
 
 local function index(state)
   local cached = state._tree_index
@@ -12,18 +15,19 @@ local function index(state)
   local ix = {items = state.items, routines = state.routines, objects = {}, by_id = {}, by_oid = {},
     children = {}, parent = {}, schemas = {}, schema_order = {}, grouped = false}
   for _, list in ipairs({state.items or {}, state.routines or {}}) do
-    for _, item in ipairs(list) do if item.schema then ix.grouped = true end end
+    for _, item in ipairs(list) do if schema_name(item.schema) then ix.grouped = true end end
   end
   local function add(item, kind)
-    local s = item.schema or state.default_schema or "main"
+    local s = schema_name(item.schema)
+    if item.schema == nil then s = schema_name(state.default_schema) end
     local identity = kind == "table" and (item.relation_id or item.name)
       or (item.source_id or item.display or item.name)
     local id = kind .. "\0" .. identity .. "\0" .. (item.display or item.name)
-    local qualified = item.relation_name and (s .. "." .. item.relation_name) or item.name
-    if qualified:sub(1, #s + 1) ~= s .. "." then qualified = s .. "." .. qualified end
+    local qualified = s and item.relation_name and (s .. "." .. item.relation_name) or item.name
+    if s and qualified:sub(1, #s + 1) ~= s .. "." then qualified = s .. "." .. qualified end
     local display = item.display or item.name
     local qualified_display = display
-    if kind == "routine" and display:sub(1, #s + 1) ~= s .. "." then
+    if s and kind == "routine" and display:sub(1, #s + 1) ~= s .. "." then
       qualified_display = s .. "." .. display
     end
     local object = {id = id, item = item, kind = kind, schema = s,
@@ -60,7 +64,9 @@ end
 function M.containers(state)
   local ix, containers = index(state), {}
   if ix.grouped then
-    for _, name in ipairs(ix.schema_order) do containers[#containers + 1] = schema_id(name) end
+    for _, name in ipairs(ix.schema_order) do
+      if name ~= "" then containers[#containers + 1] = schema_id(name) end
+    end
   end
   for id in pairs(ix.children) do containers[#containers + 1] = partition_id(id) end
   return containers
@@ -107,7 +113,7 @@ function M.build(state)
     end
     local label = item.name
     local actual_parent = ix.by_id[ix.parent[id]]
-    if actual_parent and actual_parent.schema ~= object.schema and item.relation_name then
+    if object.schema and actual_parent and actual_parent.schema ~= object.schema and item.relation_name then
       label = object.schema .. "." .. item.relation_name
     end
     local children = ix.children[id]
@@ -137,24 +143,25 @@ function M.build(state)
   local any = false
   for _, s in ipairs(ix.schema_order) do
     local sections, show = ix.schemas[s], false
+    local grouped = s ~= ""
     for _, kind in ipairs(CATEGORIES) do
       for _, object in ipairs(sections[kind]) do if wanted(object) then show = true; break end end
     end
     if show then
-      if ix.grouped then
+      if grouped then
         append({kind = "schema", id = schema_id(s), schema = s, name = s, depth = 0,
           expanded = not not is_open(schema_id(s))})
       elseif any then append({kind = "sep"}) end
-      if not ix.grouped or is_open(schema_id(s)) then
+      if not grouped or is_open(schema_id(s)) then
         for _, kind in ipairs(CATEGORIES) do
           local objects, visible = sections[kind], false
           for _, object in ipairs(objects) do if wanted(object) then visible = true; break end end
           if visible then
-            if not ix.grouped and any then append({kind = "sep"}) end
-            local parent = ix.grouped and schema_id(s) or nil
+            if not grouped and any then append({kind = "sep"}) end
+            local parent = grouped and schema_id(s) or nil
             append({kind = "header", id = "header\0" .. s .. "\0" .. kind, parent = parent,
-              depth = ix.grouped and 1 or 0, text = TITLES[kind] .. " (" .. #objects .. ")"})
-            for _, object in ipairs(objects) do walk(object, ix.grouped and 1 or 0, parent) end
+              depth = grouped and 1 or 0, text = TITLES[kind] .. " (" .. #objects .. ")"})
+            for _, object in ipairs(objects) do walk(object, grouped and 1 or 0, parent) end
             any = true
           end
         end
