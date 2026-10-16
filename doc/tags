@@ -34,8 +34,10 @@ grip-cell-split	dadbod-grip.txt	/*grip-cell-split*
 grip-column-visibility	dadbod-grip.txt	/*grip-column-visibility*
 grip-commands	dadbod-grip.txt	/*grip-commands*
 grip-config	dadbod-grip.txt	/*grip-config*
+grip-conn-groups	dadbod-grip.txt	/*grip-conn-groups*
 grip-connections	dadbod-grip.txt	/*grip-connections*
 grip-contents	dadbod-grip.txt	/*grip-contents*
+grip-databases	dadbod-grip.txt	/*grip-databases*
 grip-ddl	dadbod-grip.txt	/*grip-ddl*
 grip-diff	dadbod-grip.txt	/*grip-diff*
 grip-editing	dadbod-grip.txt	/*grip-editing*

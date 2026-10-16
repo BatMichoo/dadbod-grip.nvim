@@ -209,6 +209,7 @@ local function read_json_connections(path, source)
       if entry.env_file then c.env_file = entry.env_file end
       if entry.mode then c.mode = entry.mode end
       if entry.color then c.color = entry.color end
+      if type(entry.group) == "string" and entry.group ~= "" then c.group = entry.group end
       table.insert(result, c)
     end
   end
@@ -385,6 +386,7 @@ local function write_file_connections(conns)
     if c.env_file then entry.env_file = c.env_file end
     if c.mode then entry.mode = c.mode end
     if c.color then entry.color = c.color end
+    if c.group then entry.group = c.group end
     table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)
@@ -454,6 +456,7 @@ function M.ensure_id(url)
       if c.env_file then entry.env_file = c.env_file end
       if c.mode then entry.mode = c.mode end
       if c.color then entry.color = c.color end
+      if c.group then entry.group = c.group end
       table.insert(data, entry)
     end
     vim.fn.writefile({ vim.fn.json_encode(data) }, global_connections_path())
@@ -463,6 +466,7 @@ end
 
 --- Read g:dbs (DBUI-compatible: list or dict of connections).
 --- Supports: {name, url} dicts, plain URL strings, and {name = url} dicts.
+--- A {name, url} dict may also carry `group`, the picker folder it belongs to.
 local function read_gdbs()
   local dbs = vim.g.dbs
   if type(dbs) ~= "table" then return {} end
@@ -470,7 +474,8 @@ local function read_gdbs()
   for key, entry in pairs(dbs) do
     if type(entry) == "table" and entry.name and entry.url then
       -- Standard format: { name = "foo", url = "postgresql://..." }
-      table.insert(result, { name = entry.name, url = entry.url, source = "g:dbs" })
+      local group = type(entry.group) == "string" and entry.group ~= "" and entry.group or nil
+      table.insert(result, { name = entry.name, url = entry.url, group = group, source = "g:dbs" })
     elseif type(entry) == "string" then
       -- Plain URL string in a list, or {name = "url"} dict
       if type(key) == "string" then
@@ -480,6 +485,64 @@ local function read_gdbs()
         -- List format: { "postgresql://host/db" }
         local name = entry:match("([^/]+)$") or entry
         table.insert(result, { name = name, url = entry, source = "g:dbs" })
+      end
+    end
+  end
+  return result
+end
+
+local DEFAULT_PORTS = {
+  sqlserver = 1433, mssql = 1433,
+  postgres = 5432, postgresql = 5432,
+  mysql = 3306, mariadb = 3306,
+}
+
+--- Build a URL from a setup({ databases }) definition for one host. auth.user
+--- and auth.password become the userinfo, verbatim; every other auth key
+--- becomes a query parameter, sorted so the URL (the connection's identity)
+--- is the same every session.
+local function definition_url(def, host)
+  local scheme = def.scheme or "sqlserver"
+  local auth = vim.deepcopy(def.auth or {})
+  local userinfo = ""
+  if auth.user then
+    userinfo = auth.user .. (auth.password and (":" .. auth.password) or "") .. "@"
+  end
+  auth.user, auth.password = nil, nil
+  local keys = vim.tbl_keys(auth)
+  table.sort(keys)
+  local params = {}
+  for _, k in ipairs(keys) do table.insert(params, k .. "=" .. tostring(auth[k])) end
+  local port = def.port or DEFAULT_PORTS[scheme]
+  return string.format("%s://%s%s%s/%s%s", scheme, userinfo, host,
+    port and (":" .. port) or "", def.db or "",
+    #params > 0 and ("?" .. table.concat(params, "&")) or "")
+end
+
+--- Expand setup({ databases = { servers, definitions } }) into connections.
+--- A definition is listed once per key in its `servers`, grouped under that
+--- key and named "<key> - <name>" so the active connection stays unambiguous.
+--- A definition with a `url` uses it as-is instead of building one: it is
+--- listed once, grouped under `group` or else its first server key.
+function M.from_databases(spec)
+  if type(spec) ~= "table" then return {} end
+  local servers = spec.servers or {}
+  local result = {}
+  local function add(name, url, group)
+    table.insert(result, {
+      name = group and (group .. " - " .. name) or name,
+      url = url, group = group, source = "config",
+    })
+  end
+  for _, def in ipairs(spec.definitions or {}) do
+    if type(def) == "table" and def.name then
+      if def.url then
+        add(def.name, def.url, def.group or (def.servers or {})[1])
+      else
+        for _, key in ipairs(def.servers or {}) do
+          local host = servers[key]
+          if host then add(def.name, definition_url(def, host), key) end
+        end
       end
     end
   end
@@ -529,7 +592,7 @@ function M.list()
         -- fetch whose file entry no longer carries them.
         c = vim.tbl_extend("force", {}, c)
         for _, field in ipairs({
-          "id", "type", "env_file", "mode", "color", "attachments", "last_used",
+          "id", "type", "env_file", "mode", "color", "group", "attachments", "last_used",
         }) do
           if c[field] == nil then c[field] = filed[field] end
         end
@@ -551,18 +614,43 @@ function M.list()
   local new_global = false
   local global_existing = read_json_connections(global_connections_path(), "global")
   local global_seen = {}
-  for _, gc in ipairs(global_existing) do global_seen[gc.url] = true end
+  for _, gc in ipairs(global_existing) do global_seen[gc.url] = gc end
+  local all_by_url = {}
+  for _, c in ipairs(all) do all_by_url[c.url] = c end
 
   for _, c in ipairs(gdbs) do
     if not seen[c.url] then
       seen[c.url] = true
       table.insert(all, c)
+      all_by_url[c.url] = c
+    elseif c.group then
+      -- g:dbs is generated from the user's config, so its group is the
+      -- current one even when a saved entry for the same URL won the dedup.
+      all_by_url[c.url].group = c.group
     end
-    -- Persist to global if not already there
-    if not global_seen[c.url] then
-      table.insert(global_existing, { id = new_connection_id(c.url), name = c.name, url = c.url })
-      global_seen[c.url] = true
+    -- Persist to global if not already there, and keep its group in step
+    local gc = global_seen[c.url]
+    if not gc then
+      gc = { id = new_connection_id(c.url), name = c.name, url = c.url, group = c.group }
+      table.insert(global_existing, gc)
+      global_seen[c.url] = gc
       new_global = true
+    elseif c.group and gc.group ~= c.group then
+      gc.group = c.group
+      new_global = true
+    end
+  end
+
+  -- setup({ databases }): config-defined, so like g:dbs its group wins, but
+  -- never copied to the global file -- the config already lists them every
+  -- session, and their URLs carry passwords.
+  for _, c in ipairs(M.from_databases(require("dadbod-grip").get_opts().databases)) do
+    if not seen[c.url] then
+      seen[c.url] = true
+      table.insert(all, c)
+      all_by_url[c.url] = c
+    elseif c.group then
+      all_by_url[c.url].group = c.group
     end
   end
 
@@ -579,6 +667,7 @@ function M.list()
       if gc.env_file then gentry.env_file = gc.env_file end
       if gc.mode then gentry.mode = gc.mode end
       if gc.color then gentry.color = gc.color end
+      if gc.group then gentry.group = gc.group end
       table.insert(gdata, gentry)
     end
     vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
@@ -728,12 +817,15 @@ function M.touch(url)
   end
 end
 
---- Remove a connection from .grip/connections.json by name.
-function M.remove(name)
+--- Remove a connection from .grip/connections.json. Matches by URL when one is
+--- given, since grouped connections often share a name ("billing" in DEV and
+--- in QA); by name otherwise.
+function M.remove(name, url)
   local conns = read_local_connections()
   local filtered = {}
   for _, c in ipairs(conns) do
-    if c.name ~= name then
+    local match = url and c.url == url or (not url and c.name == name)
+    if not match then
       table.insert(filtered, c)
     end
   end
@@ -1085,7 +1177,10 @@ local function prompt_temp_connection()
 end
 
 --- Open a picker to select and switch connection. Uses grip_picker (zero external deps).
---- @param opts? { on_cancel?: function }  optional overrides; default on_cancel = open_welcome
+--- Connections with a `group` are listed inside a folder of that name: the top
+--- level shows one row per folder, and selecting it reopens the picker on
+--- that group alone.
+--- @param opts? { on_cancel?: function, group?: string }  group = folder to open
 function M.pick(opts)
   opts = opts or {}
   local on_cancel = opts.on_cancel or function() require("dadbod-grip").open_welcome() end
@@ -1136,6 +1231,42 @@ function M.pick(opts)
   -- Called at open time and from on_delete to refresh after a deletion.
   local function build_picker_items()
     local fresh = M.list()
+
+    -- Inside a folder: a way back up, then that group's connections, MRU first.
+    if opts.group then
+      local members = {}
+      for _, c in ipairs(fresh) do
+        if c.group == opts.group and not (c._builtin_id or c._is_demo) then
+          table.insert(members, c)
+        end
+      end
+      table.sort(members, function(a, b) return (a.last_used or 0) > (b.last_used or 0) end)
+      local out = { { name = "..", url = "", _up = true, _section_header = true } }
+      vim.list_extend(out, members)
+      any_ro = false
+      for _, c in ipairs(members) do
+        if c.mode == "ro" then any_ro = true; break end
+      end
+      return out
+    end
+
+    -- Top level: grouped connections collapse into one folder row per group.
+    -- Folder rows carry _section_header so every action and on_delete skips them.
+    local folders, folder_order, ungrouped = {}, {}, {}
+    for _, c in ipairs(fresh) do
+      if c.group and not (c._builtin_id or c._is_demo) then
+        if not folders[c.group] then
+          folders[c.group] = { name = c.group, url = "", _folder = c.group,
+                               _count = 0, _section_header = true }
+          table.insert(folder_order, c.group)
+        end
+        folders[c.group]._count = folders[c.group]._count + 1
+      else
+        table.insert(ungrouped, c)
+      end
+    end
+    table.sort(folder_order)
+    fresh = ungrouped
     local use_sections = not configured_connections_path()
 
     local global_conns, project_conns, other_conns = {}, {}, {}
@@ -1158,6 +1289,7 @@ function M.pick(opts)
     sort_mru(project_conns)
 
     local out = {}
+    for _, g in ipairs(folder_order) do table.insert(out, folders[g]) end
     local show_headers = use_sections and #global_conns > 0
 
     if show_headers then
@@ -1196,10 +1328,14 @@ function M.pick(opts)
   local show_pass = {}
 
   require("dadbod-grip.grip_picker").open({
-    title = "Connections",
+    title = opts.group and ("Connections / " .. opts.group) or "Connections",
     items = picker_items,
     on_cancel = on_cancel,
     display = function(c)
+      if c._folder then
+        local pad = string.rep(" ", math.max(0, max_name - vim.fn.strdisplaywidth(c.name)))
+        return "▸ " .. c.name .. pad .. "  (" .. c._count .. ")"
+      end
       if c._section_header then
         return "  " .. c.name
       end
@@ -1226,6 +1362,14 @@ function M.pick(opts)
       return dot .. " " .. c.name .. pad .. "  " .. ro .. url_display
     end,
     on_select = function(c)
+      if c._folder then
+        M.pick({ group = c._folder, on_cancel = opts.on_cancel })
+        return
+      end
+      if c._up then
+        M.pick({ on_cancel = opts.on_cancel })
+        return
+      end
       if c._section_header then return end
       if c._new then
         prompt_new_connection()
@@ -1273,7 +1417,7 @@ function M.pick(opts)
         return
       end
       if ui.confirm("Remove '" .. c.name .. "'? (y/N): ") then
-        M.remove(c.name)
+        M.remove(c.name, c.url)
         refresh_fn(build_picker_items())
       end
     end,
@@ -1443,7 +1587,7 @@ function M.pick(opts)
           end
           local promoted = { id = c.id or new_connection_id(c.url),
                               name = c.name, url = c.url, type = c.type,
-                              env_file = c.env_file, mode = c.mode, color = c.color,
+                              env_file = c.env_file, mode = c.mode, color = c.color, group = c.group,
                               attachments = c.attachments, last_used = c.last_used }
           table.insert(global_conns, promoted)
           local gdata = {}
@@ -1456,6 +1600,7 @@ function M.pick(opts)
             if gc.env_file then entry.env_file = gc.env_file end
             if gc.mode then entry.mode = gc.mode end
             if gc.color then entry.color = gc.color end
+            if gc.group then entry.group = gc.group end
             table.insert(gdata, entry)
           end
           vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_path)

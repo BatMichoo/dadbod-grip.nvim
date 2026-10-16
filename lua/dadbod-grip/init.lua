@@ -1882,6 +1882,7 @@ end
 ---@field border? string|table   Float window border style (default: "rounded")
 ---@field cell_split? string     Cell buffer (gB) split style: "horizontal"|"vertical"
 ---@field open_sidebar? boolean  Open the schema sidebar on connection (default: true)
+---@field databases? table       Connections as { servers = { KEY = host }, definitions = { ... } }
 
 ---Setup dadbod-grip with user options.
 ---@param opts? DadbodGripOpts
@@ -1906,6 +1907,7 @@ function M.setup(opts)
     discovery     = { opts.discovery, "boolean", true },
     sticky_header = { opts.sticky_header, "boolean", true },
     open_sidebar  = { opts.open_sidebar,  "boolean", true },
+    databases     = { opts.databases,     "table",   true },
     sqlserver_max_type_width = { opts.sqlserver_max_type_width, function(v)
       return v == nil or (type(v) == "number" and v >= 0 and v <= 8000 and v % 1 == 0)
     end, "integer from 0 to 8000, or nil" },
@@ -1921,6 +1923,7 @@ function M.setup(opts)
   if opts.discovery ~= nil then OPTS.discovery = opts.discovery end
   if opts.sticky_header ~= nil then OPTS.sticky_header = opts.sticky_header end
   OPTS.open_sidebar = opts.open_sidebar ~= false
+  OPTS.databases = opts.databases
   OPTS.sqlserver_max_type_width = opts.sqlserver_max_type_width
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.

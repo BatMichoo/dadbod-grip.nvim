@@ -1034,13 +1034,61 @@ Beyond `name` and `url`, an entry in either connections.json may carry:
   mode       "ro" to connect read-only, "rw" (or absent) to connect writable
   color      accent colour for this connection: a palette name
              (green, orange, red, blue, violet, yellow) or "#rrggbb"
+  group      picker folder for this connection, e.g. "DEV" or "QA"
   attachments DuckDB federation entries restored on reconnect
 
 All are optional. Existing files remain readable and IDs are added lazily.
 
-These fields exist only in a connections.json entry. `g:dbs` is read as the
-vim-dadbod-ui format -- name and url and nothing else -- so a `color`,
-`mode`, `env_file` or `type` written there is discarded on read.
+These fields exist only in a connections.json entry, except `group`. `g:dbs`
+is read as the vim-dadbod-ui format -- name, url, and `group` -- so a `color`,
+`mode`, `env_file` or `type` written there is discarded on read. A `g:dbs`
+group wins over a saved entry for the same URL, since `g:dbs` is generated
+from your config.
+
+Connection groups ~
+                                                         *grip-conn-groups*
+Connections with a `group` are listed inside a folder in the picker. The top
+level shows one row per group with its connection count; selecting the row
+opens that group alone, and `..` goes back. Connections without a group are
+listed beside the folders as before. >lua
+  vim.g.dbs = {
+    { name = "billing", url = "sqlserver://dev-sql/billing", group = "DEV" },
+    { name = "billing", url = "sqlserver://qa-sql/billing",  group = "QA" },
+  }
+<
+The picker filter (`/`) matches the rows on screen, so it searches folder
+names at the top level and connection names inside a folder.
+
+Connections from setup() ~
+                                                         *grip-databases*
+`databases` in setup() defines connections in your config, one definition
+per database, listed once for each server it lives on: >lua
+  require("dadbod-grip").setup({
+    databases = {
+      servers = { DEV = "dev-sql.example.com", QA = "qa-sql.example.com" },
+      definitions = {
+        { name = "billing", db = "billing", servers = { "DEV", "QA" },
+          auth = { authentication = "ActiveDirectoryDefault" } },
+        { name = "legacy", url = "sqlserver://old-host/legacy", group = "QA" },
+      },
+    },
+  })
+<
+Each server key becomes a picker folder, and each connection is named
+"<key> - <name>", e.g. "DEV - billing". A definition's URL is built as
+`scheme://user:password@host:port/db?key=value...`:
+
+  scheme   default "sqlserver"
+  port     default for the scheme (1433, 5432, 3306), else omitted
+  db       database name (the URL path)
+  auth     `user` and `password` form the userinfo, used verbatim; every
+           other key becomes a query parameter, sorted
+  url      used as-is instead of a built URL; listed once, in `group` or
+           else in the folder of its first server key
+
+These connections are not copied to ~/.grip/connections.json. Selecting one
+saves it to the project file like any other connection, for MRU order, and
+the `databases` group stays in charge of its folder.
 
 Saved-query connection binding ~
 
@@ -1327,6 +1375,7 @@ grip.setup({opts})
     sticky_header (boolean) Column names in the winbar. Default: true
                             See |grip-sticky-header|
     open_sidebar  (boolean) Open schema sidebar on connect. Default: true
+    databases     (table)   Connections and groups. See |grip-databases|
     sqlserver_max_type_width (number|nil)
                             Characters sqlcmd returns for varchar(max),
                             nvarchar(max), xml and similar columns, 0 for

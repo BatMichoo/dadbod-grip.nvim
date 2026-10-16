@@ -349,6 +349,177 @@ test("switch: resulting file is byte-identical to the old add()+touch() sequence
   eq(old_content, new_content, "byte-identical output for the same logical mutation")
 end)
 
+-- ── connection groups (picker folders) ─────────────────────────────────────
+
+--- Run fn with g:dbs set and grip_picker.open captured instead of drawn.
+--- fn receives a function returning the most recent open() options.
+local function with_picker(dbs, fn)
+  local orig_picker = package.loaded["dadbod-grip.grip_picker"]
+  local orig_docker = package.loaded["dadbod-grip.sources.docker_localdb"]
+  local orig_dbs = vim.g.dbs
+  local last
+  package.loaded["dadbod-grip.grip_picker"] = { open = function(o) last = o end }
+  -- No `docker ps`: setup({ discovery = false }) would outlive this test.
+  package.loaded["dadbod-grip.sources.docker_localdb"] = {
+    fetch = function() return { connections = {} } end,
+  }
+  vim.g.dbs = dbs
+  local ok, err = pcall(fn, function() return last end)
+  package.loaded["dadbod-grip.grip_picker"] = orig_picker
+  package.loaded["dadbod-grip.sources.docker_localdb"] = orig_docker
+  vim.g.dbs = orig_dbs
+  if not ok then error(err) end
+end
+
+local function names(items)
+  local out = {}
+  for _, it in ipairs(items) do table.insert(out, it.name) end
+  return table.concat(out, ",")
+end
+
+local GROUPED_DBS = {
+  { name = "dev-billing", url = "sqlserver://dev/billing", group = "DEV" },
+  { name = "dev-orders",  url = "sqlserver://dev/orders",  group = "DEV" },
+  { name = "qa-billing",  url = "sqlserver://qa/billing",  group = "QA" },
+  { name = "loose",       url = "sqlserver://loose/db" },
+}
+
+test("groups: the top level shows one folder per group, ungrouped entries as before", function()
+  with_real_file(function()
+    with_picker(GROUPED_DBS, function(last)
+      connections.pick()
+      local items = last().items
+      eq(items[1]._folder, "DEV", "folders first, sorted")
+      eq(items[1]._count, 2, "DEV member count")
+      eq(items[2]._folder, "QA", "second folder")
+      local listed = names(items)
+      assert(listed:find("loose", 1, true), "ungrouped entry listed: " .. listed)
+      assert(not listed:find("dev-billing", 1, true), "grouped entry hidden at top level: " .. listed)
+      eq(last().title, "Connections", "top-level title")
+      assert(last().display(items[1]):find("DEV", 1, true), "folder row names the group")
+    end)
+  end)
+end)
+
+test("groups: selecting a folder opens it, and .. returns to the top level", function()
+  with_real_file(function()
+    with_picker(GROUPED_DBS, function(last)
+      connections.pick()
+      last().on_select(last().items[1])
+      eq(last().title, "Connections / DEV", "folder title")
+      local items = last().items
+      eq(items[1]._up, true, "first row goes back up")
+      eq(#items, 3, ".. plus the two DEV connections: " .. names(items))
+      local listed = names(items)
+      assert(listed:find("dev-billing", 1, true) and listed:find("dev-orders", 1, true), listed)
+      assert(not listed:find("qa-billing", 1, true), "other groups excluded: " .. listed)
+
+      last().on_select(items[1])
+      eq(last().title, "Connections", "back at the top level")
+      eq(last().items[1]._folder, "DEV", "folders shown again")
+    end)
+  end)
+end)
+
+test("groups: a group saved in connections.json survives a switch() rewrite", function()
+  with_real_file(function(local_grip)
+    vim.fn.mkdir(local_grip, "p")
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "app", url = "sqlite:/tmp/grip_group_test.db", group = "DEV" },
+    }) }, local_grip .. "/connections.json")
+    connections.switch("sqlite:/tmp/grip_group_test.db", "app")
+    eq(read_connections_json(local_grip)[1].group, "DEV", "group kept on write")
+  end)
+end)
+
+test("groups: a g:dbs group applies to a saved entry with the same URL", function()
+  with_real_file(function(local_grip, global_grip)
+    vim.fn.mkdir(local_grip, "p")
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "dev-billing", url = "sqlserver://dev/billing" },
+    }) }, local_grip .. "/connections.json")
+    with_picker(GROUPED_DBS, function(last)
+      connections.pick()
+      eq(last().items[1]._count, 2, "the saved entry still counts toward DEV")
+    end)
+    local global = read_connections_json(global_grip)
+    local by_url = {}
+    for _, c in ipairs(global) do by_url[c.url] = c end
+    eq(by_url["sqlserver://qa/billing"].group, "QA", "group persisted to the global file")
+  end)
+end)
+
+test("remove: a URL removes only that entry when names repeat across groups", function()
+  with_real_file(function(local_grip)
+    vim.fn.mkdir(local_grip, "p")
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "billing", url = "sqlserver://dev/billing", group = "DEV" },
+      { name = "billing", url = "sqlserver://qa/billing",  group = "QA" },
+    }) }, local_grip .. "/connections.json")
+    connections.remove("billing", "sqlserver://dev/billing")
+    local left = read_connections_json(local_grip)
+    eq(#left, 1, "one entry left")
+    eq(left[1].url, "sqlserver://qa/billing", "the QA entry survives")
+  end)
+end)
+
+-- ── setup({ databases }) ────────────────────────────────────────────────────
+
+local DATABASES = {
+  servers = { DEV = "dev-sql", QA = "qa-sql" },
+  definitions = {
+    { name = "billing", db = "billing", servers = { "DEV", "QA", "MISSING" },
+      auth = { user = "app", password = "pw", authentication = "ActiveDirectoryDefault" } },
+    { name = "reports", scheme = "postgres", db = "rpt", servers = { "DEV" } },
+    { name = "legacy", url = "sqlserver://legacy-host/old", servers = { "QA" } },
+    { name = "scratch", url = "sqlite:/tmp/scratch.db" },
+  },
+}
+
+test("from_databases: one connection per server, grouped and named by key", function()
+  local by_name = {}
+  for _, c in ipairs(connections.from_databases(DATABASES)) do by_name[c.name] = c end
+  eq(by_name["DEV - billing"].url,
+    "sqlserver://app:pw@dev-sql:1433/billing?authentication=ActiveDirectoryDefault",
+    "built URL: userinfo, default port, other auth keys as query")
+  eq(by_name["DEV - billing"].group, "DEV", "group is the server key")
+  eq(by_name["QA - billing"].url,
+    "sqlserver://app:pw@qa-sql:1433/billing?authentication=ActiveDirectoryDefault", "QA host")
+  eq(by_name["MISSING - billing"], nil, "server key without a host is skipped")
+  eq(by_name["DEV - reports"].url, "postgres://dev-sql:5432/rpt", "scheme picks its default port")
+end)
+
+test("from_databases: a definition url wins and is listed once", function()
+  local by_name = {}
+  for _, c in ipairs(connections.from_databases(DATABASES)) do by_name[c.name] = c end
+  eq(by_name["QA - legacy"].url, "sqlserver://legacy-host/old", "url used as-is")
+  eq(by_name["QA - legacy"].group, "QA", "grouped under its first server key")
+  eq(by_name["scratch"].url, "sqlite:/tmp/scratch.db", "no group: plain name")
+  eq(by_name["scratch"].group, nil, "no group")
+end)
+
+test("databases option: picker shows the folders, nothing is written to the global file", function()
+  with_real_file(function(_, global_grip)
+    with_picker(nil, function(last)
+      grip.setup({ databases = DATABASES })
+      connections.pick()
+      local items = last().items
+      eq(items[1]._folder, "DEV", "DEV folder")
+      eq(items[1]._count, 2, "billing + reports")
+      eq(items[2]._folder, "QA", "QA folder")
+      eq(items[2]._count, 2, "billing + legacy")
+      assert(names(items):find("scratch", 1, true), "ungrouped entry at the top level")
+      eq(vim.fn.filereadable(global_grip .. "/connections.json"), 0,
+        "config connections are not copied to the global file")
+    end)
+  end)
+end)
+
+test("databases option: rejects a non-table value", function()
+  assert(not pcall(grip.setup, { databases = "nope" }), "string rejected")
+  grip.setup({})
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 
 print(string.format("\nconnections_spec: %d passed, %d failed", pass, fail))
