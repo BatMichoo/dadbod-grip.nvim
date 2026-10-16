@@ -1357,6 +1357,10 @@ and mssql:// accept these URL query parameters:
 server_certificate cannot be combined with trust_server_certificate=true
 and requires mandatory or strict encryption.
 
+sqlcmd cuts varchar(max), nvarchar(max) and xml values at 256 characters,
+which breaks long JSON cells. With go-sqlcmd, set sqlserver_max_type_width
+= 0 in setup() to return them in full (see |grip.setup()|).
+
 To log in with Microsoft Entra ID (Azure AD) instead of a SQL login, add
 authentication=<method>. It is passed to sqlcmd as --authentication-method,
 which requires the go-sqlcmd client (mssql-tools sqlcmd does not support it).
@@ -1391,6 +1395,11 @@ grip.setup({opts})
     sticky_header (boolean) Column names in the winbar. Default: true
                             See |grip-sticky-header|
     open_sidebar  (boolean) Open schema sidebar on connect. Default: true
+    sqlserver_max_type_width (number|nil)
+                            Characters sqlcmd returns for varchar(max),
+                            nvarchar(max), xml and similar columns, 0 for
+                            unlimited. Default: nil (sqlcmd's own 256).
+                            go-sqlcmd only; mssql-tools sqlcmd ignores it.
 
                                                            *grip.open()*
 grip.open({arg}, {url}, {opts})

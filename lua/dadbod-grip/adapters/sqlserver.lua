@@ -111,11 +111,13 @@ local function sqlcmd_args(parsed)
   }
 
   -- Both clients cut (n)varchar(max)/xml values at 256 characters by default,
-  -- which breaks long JSON cells. go-sqlcmd allows -y 0 (unlimited) next to
-  -- -W; mssql-tools sqlcmd rejects -y combined with -W, so it keeps the limit.
-  if is_go_sqlcmd() then
+  -- which breaks long JSON cells. The sqlserver_max_type_width option raises
+  -- that (0 = unlimited) via -y. go-sqlcmd allows -y next to -W; mssql-tools
+  -- sqlcmd rejects the combination, so it keeps its default limit.
+  local max_type_width = require("dadbod-grip").get_opts().sqlserver_max_type_width
+  if max_type_width and is_go_sqlcmd() then
     args[#args + 1] = "-y"
-    args[#args + 1] = "0"
+    args[#args + 1] = tostring(max_type_width)
   end
 
   if parsed.trust_server_certificate then args[#args + 1] = "-C" end

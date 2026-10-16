@@ -456,24 +456,33 @@ test("sqlserver TLS defaults to validation and allows explicit local trust", fun
   has_arg(args, "-C", "explicit certificate bypass")
 end)
 
-test("sqlserver lifts the 256-char max-type limit only for go-sqlcmd", function()
+test("sqlserver_max_type_width maps to -y only for go-sqlcmd", function()
+  local grip = require("dadbod-grip")
   local parsed = assert(sqlserver._parse_url("sqlserver://sa:pw@db/app"))
-  local function has_y0(args)
+  local function y_value(args)
     for i, a in ipairs(args) do
-      if a == "-y" and args[i + 1] == "0" then return true end
+      if a == "-y" then return args[i + 1] end
     end
-    return false
   end
 
   sqlserver._set_go_sqlcmd(true)
+  grip.setup({})
+  eq(y_value(sqlserver._sqlcmd_args(parsed, "SELECT 1")), nil, "off by default")
+
+  grip.setup({ sqlserver_max_type_width = 0 })
   local args = sqlserver._sqlcmd_args(parsed, "SELECT 1")
-  assert(has_y0(args), "go-sqlcmd gets -y 0")
-  has_arg(args, "-W", "-W kept alongside -y 0")
+  eq(y_value(args), "0", "0 means unlimited")
+  has_arg(args, "-W", "-W kept alongside -y")
 
   sqlserver._set_go_sqlcmd(false)
-  assert(not has_y0(sqlserver._sqlcmd_args(parsed, "SELECT 1")),
+  eq(y_value(sqlserver._sqlcmd_args(parsed, "SELECT 1")), nil,
     "mssql-tools sqlcmd rejects -y with -W")
+
+  local ok = pcall(grip.setup, { sqlserver_max_type_width = 9000 })
+  assert(not ok, "out-of-range width rejected")
+
   sqlserver._set_go_sqlcmd(nil)
+  grip.setup({})
 end)
 
 test("sqlserver stdin terminates the final batch with GO exactly once", function()
