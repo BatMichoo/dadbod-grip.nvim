@@ -906,18 +906,28 @@ to scanning each table's foreign keys once.
 10. SCHEMA BROWSER                                          *grip-schema*
 
 Toggle with `:GripSchema` or `gb` from a grid or query-pad buffer. Opens a
-left sidebar showing all tables and views for the current connection.
+left sidebar showing tables, views, functions, and procedures for the current
+connection. When the adapter supplies schema metadata, schemas start collapsed.
+Adapters without schema metadata keep their flat sections.
+
+PostgreSQL declarative partitions appear once beneath their actual parent in a
+separate Partitions group. Nested partitions retain their hierarchy, and
+cross-schema children show their schema. Children whose parent is not visible
+remain at the top level. Traditional inheritance stays flat. Group counts show
+visible direct children; browsing and expanding columns do not count data rows.
+Opening a parent table uses the normal parent query, including its partitions.
+Metadata visibility does not guarantee permission to query every column.
 
 Schema browser keymaps:
-  <CR>            Open table in grid (or open parent table from column)
+  <CR>            Open table/routine, or toggle schema/partition group
   <S-CR>          Open table in new split
-  l / zo          Expand table to show columns
-  h / zc          Collapse table
-  L               Expand all tables
-  H               Collapse all tables
-  /               Filter tables by name
-  n / N           Jump to next / previous table match
-  F               Clear filter
+  l / zo          Expand group or table columns
+  h / zc          Collapse item, or move to its parent
+  L               Expand schema/partition groups without loading columns
+  H               Collapse all groups and table columns
+  /               Search hidden names and routine identity signatures
+  n / N           Jump to next / previous visible table or routine
+  F               Clear filter and restore the original folds and view
   r               Refresh schema (re-fetch table list)
   y               Yank table or column name to clipboard
   go              Open table under cursor, ORDER BY latest (created_at / PK DESC)
@@ -933,7 +943,15 @@ Schema browser keymaps:
   <Esc>           Close sidebar
   ?               Toggle help popup
 
-Columns show type abbreviations (int, text, bool, vc(255), etc.) and
+Search temporarily reveals matching paths without changing the saved folds.
+Editing a filter keeps the original pre-search view; cancelling leaves the
+active filter and selection unchanged. Functions and procedures retain their
+full identity signatures, and opening a PostgreSQL routine uses its exact OID.
+
+Labels remain complete in the buffer. Use `zh`/`zl` to scroll horizontally,
+`zH`/`zL` for half-window scrolling, or `0`/`$` to reach either end of a label.
+The window edge indicates clipped text. Columns load on explicit table
+expansion and show type abbreviations (int, text, bool, vc(255), etc.) with
 markers for primary keys and foreign keys.
 
 ==============================================================================

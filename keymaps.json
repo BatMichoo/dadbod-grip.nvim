@@ -1010,7 +1010,7 @@
     {
       "action": "sidebar_open",
       "default": "<CR>",
-      "description": "Opens the table under the cursor.",
+      "description": "Opens the object or toggles the group under the cursor.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1026,7 +1026,7 @@
     {
       "action": "sidebar_expand",
       "default": "l",
-      "description": "Expands the table under the cursor.",
+      "description": "Expands the group or table columns under the cursor.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1034,7 +1034,7 @@
     {
       "action": "sidebar_collapse",
       "default": "h",
-      "description": "Collapses the table under the cursor.",
+      "description": "Collapses the item or moves to its parent.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1042,7 +1042,7 @@
     {
       "action": "sidebar_expand_z",
       "default": "zo",
-      "description": "Expands the table with the fold-style key.",
+      "description": "Expands the group or table columns with the fold-style key.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1050,7 +1050,7 @@
     {
       "action": "sidebar_collap_z",
       "default": "zc",
-      "description": "Collapses the table with the fold-style key.",
+      "description": "Collapses the item or moves to its parent with the fold-style key.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1058,7 +1058,7 @@
     {
       "action": "sidebar_expand_all",
       "default": "L",
-      "description": "Expands every table.",
+      "description": "Expands schema and partition groups without loading columns.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1066,7 +1066,7 @@
     {
       "action": "sidebar_collap_all",
       "default": "H",
-      "description": "Collapses every table.",
+      "description": "Collapses all groups and table columns.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1074,7 +1074,7 @@
     {
       "action": "sidebar_filter",
       "default": "/",
-      "description": "Filters tables by name.",
+      "description": "Searches hidden objects by name or routine signature.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1082,7 +1082,7 @@
     {
       "action": "sidebar_filter_c",
       "default": "F",
-      "description": "Clears the sidebar filter.",
+      "description": "Clears the sidebar filter and restores the original view.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1090,7 +1090,7 @@
     {
       "action": "sidebar_next",
       "default": "n",
-      "description": "Moves to the next table.",
+      "description": "Moves to the next visible table or routine.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -1098,7 +1098,7 @@
     {
       "action": "sidebar_prev",
       "default": "N",
-      "description": "Moves to the previous table.",
+      "description": "Moves to the previous visible table or routine.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]

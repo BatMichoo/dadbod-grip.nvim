@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The schema browser groups tables, views, functions, and procedures under
+  collapsed schemas when schema metadata is available. PostgreSQL partitions
+  appear beneath their actual parents, including nested and cross-schema
+  partitions. Search finds hidden objects and routine signatures, then restores
+  the previous folds and view when cleared.
+
+### Changed
+
+- Sidebar labels retain complete names and signatures for native horizontal
+  scrolling. `L` opens schema and partition groups without fetching every
+  table's columns. Expanding columns no longer runs an exact row count.
+
 ## [3.11.1] - 2026-10-15
 
 ### Fixed

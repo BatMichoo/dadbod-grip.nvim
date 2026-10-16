@@ -486,25 +486,74 @@ function M.explain(sql_str, url)
   return { lines = lines }, nil
 end
 
-function M.list_tables(url)
-  local sql_str = [[
+local TABLES_SQL = [[
     SELECT
       CASE WHEN table_schema = 'public' THEN table_name
            ELSE table_schema || '.' || table_name END AS table_name,
-      CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
+      CASE WHEN table_type = 'VIEW' THEN 'view' ELSE 'table' END AS table_type,
+      table_schema AS schema, table_name AS relation_name
     FROM information_schema.tables
     WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
     ORDER BY table_schema, table_type DESC, table_name
   ]]
-  local stdout, stderr, code = psql(url, sql_str)
+
+local TABLES_TREE_SQL = [[
+    SELECT
+      CASE WHEN t.table_schema = 'public' THEN t.table_name
+           ELSE t.table_schema || '.' || t.table_name END AS table_name,
+      CASE WHEN t.table_type = 'VIEW' THEN 'view' ELSE 'table' END AS table_type,
+      c.oid::text AS relation_id, t.table_schema AS schema,
+      t.table_name AS relation_name, c.relkind::text AS relation_kind,
+      c.relispartition AS is_partition, i.inhparent::text AS parent_id,
+      has_table_privilege(c.oid, 'SELECT') AS can_select_all
+    FROM information_schema.tables t
+    LEFT JOIN pg_catalog.pg_namespace n ON n.nspname = t.table_schema
+    LEFT JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid AND c.relname = t.table_name
+    LEFT JOIN pg_catalog.pg_inherits i ON i.inhrelid = c.oid AND c.relispartition
+    WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY t.table_schema, t.table_type DESC, t.table_name
+  ]]
+
+local _unsupported_tree = {}
+local _tree_notice = {}
+
+local function catalog_bool(value)
+  if value == nil or value == "" then return nil end
+  return value == "t"
+end
+
+function M.list_tables(url)
+  local stdout, stderr, code = psql(url, _unsupported_tree[url] and TABLES_SQL or TABLES_TREE_SQL)
+  if code ~= 0 and not _unsupported_tree[url] then
+    local unsupported = stderr:find("relispartition", 1, true) and stderr:find("does not exist", 1, true)
+    stdout, stderr, code = psql(url, TABLES_SQL)
+    if code == 0 then
+      if unsupported then _unsupported_tree[url] = true end
+      if not _tree_notice[url] then
+        _tree_notice[url] = true
+        vim.notify("Grip: partition metadata unavailable; showing all visible relations by schema.", vim.log.levels.WARN)
+      end
+    end
+  end
   if code ~= 0 then
     return nil, stderr ~= "" and stderr or "Failed to list tables"
   end
   local parsed = db_util.parse_csv(stdout)
   if not parsed then return nil, "Failed to parse table list" end
+  local fields = {}
+  for i, field in ipairs(parsed.columns) do fields[field] = i end
   local result = {}
   for _, row in ipairs(parsed.rows) do
-    table.insert(result, { name = row[1] or "", type = row[2] or "table" })
+    local function field(name)
+      local value = fields[name] and row[fields[name]]
+      if value ~= "" then return value end
+    end
+    table.insert(result, {
+      name = row[1] or "", type = row[2] or "table", schema = field("schema"),
+      relation_name = field("relation_name"), relation_id = field("relation_id"),
+      relation_kind = field("relation_kind"), is_partition = catalog_bool(field("is_partition")),
+      parent_id = field("parent_id"), can_select_all = catalog_bool(field("can_select_all")),
+    })
   end
   return result, nil
 end

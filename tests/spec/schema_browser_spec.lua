@@ -1,0 +1,204 @@
+dofile("tests/minimal_init.lua")
+local schema = require("dadbod-grip.schema")
+local db = require("dadbod-grip.db")
+local grip = require("dadbod-grip")
+local ui = require("dadbod-grip.ui")
+local pass, fail = 0, 0
+local function test(name, fn)
+  local ok, err = pcall(fn)
+  if ok then pass = pass + 1 else fail = fail + 1; print("FAIL: " .. name .. ": " .. tostring(err)) end
+end
+local long_name = "metrics.capacity_with_the_complete_very_long_unicode_name_測定_suffix_2026_08_17"
+local items = {
+  {name=long_name,type="table",schema="metrics",relation_name=long_name:sub(9),relation_id="1",relation_kind="p"},
+  {name="metrics.capacity_2026",type="table",schema="metrics",relation_id="2",relation_kind="p",is_partition=true,parent_id="1"},
+  {name="archive.capacity_p_2026_08_17",type="table",schema="archive",relation_id="3",relation_kind="r",is_partition=true,parent_id="2"},
+  {name="metrics.other",type="table",schema="metrics",relation_id="4",relation_kind="r"},
+}
+local routines = {
+  {name="analytics.calc",display="analytics.calc(value integer)",type="function",schema="analytics",source_id="101"},
+  {name="analytics.calc",display="analytics.calc(value text)",type="function",schema="analytics",source_id="102"},
+  {name="analytics.run",display="analytics.run(value integer)",type="procedure",schema="analytics",source_id="103"},
+}
+local function with_browser(fn)
+  schema.close(); schema._reset_state()
+  local original_win = vim.api.nvim_get_current_win()
+  local saved, opened, columns, queries, sources = {}, {}, {}, {}, {}
+  for _, key in ipairs({"list_tables","list_routines","get_column_info","get_primary_keys","get_foreign_keys","query","get_routine_source"}) do saved[key]=db[key] end
+  local real_open, real_input = grip.open, ui.input
+  db.list_tables=function()return vim.deepcopy(items) end
+  db.list_routines=function()return vim.deepcopy(routines) end
+  db.get_column_info=function(name) columns[#columns+1]=name;return {{column_name="id",data_type="integer"}} end
+  db.get_primary_keys=function()return {} end
+  db.get_foreign_keys=function()return {} end
+  db.query=function(sql) queries[#queries+1]=sql;return {rows={{"1"}}} end
+  db.get_routine_source=function(id) sources[#sources+1]=id;return "SELECT '"..id.."';" end
+  grip.open=function(name)opened[#opened+1]=name end
+  local url="postgresql://synthetic.invalid/sidebar"
+  schema.toggle(url)
+  local st=schema.get_state(url)
+  local win=schema.get_winid()
+  local function select_node(kind,name,source_id)
+    vim.api.nvim_set_current_win(win)
+    for i,node in ipairs(st.nodes) do
+      if node.kind==kind and (node.name==name or node.schema==name) and (not source_id or node.source_id==source_id) then
+        vim.api.nvim_win_set_cursor(win,{i+(st.filter and 4 or 2),0});return node
+      end
+    end
+    error("node missing: "..kind..":"..name)
+  end
+  local function press(key)
+    vim.api.nvim_set_current_win(win)
+    local map=vim.fn.maparg(key,"n",false,true)
+    assert(type(map.callback)=="function","missing map "..key)
+    map.callback()
+    vim.wait(5)
+  end
+  local function current()
+    local row=vim.api.nvim_win_get_cursor(win)[1]
+    return st.nodes[row-(st.filter and 4 or 2)]
+  end
+  local ok,err=pcall(fn,{state=st,win=win,select=select_node,press=press,current=current,
+    opened=opened,columns=columns,queries=queries,sources=sources,
+    lines=function()return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win),0,-1,false) end,
+    filter=function(value)ui.input=function()return value end;press("/")end})
+  schema.close(); schema._reset_state()
+  grip.open,ui.input=real_open,real_input
+  for key,value in pairs(saved) do db[key]=value end
+  for _,window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if window~=original_win then pcall(vim.api.nvim_win_close,window,true) end
+  end
+  if vim.api.nvim_win_is_valid(original_win) then vim.api.nvim_set_current_win(original_win) end
+  assert(ok,err)
+end
+
+test("schema Enter and l aliases expose all object kinds without fetching columns",function()
+  with_browser(function(b)
+    b.select("schema","analytics");b.press("<CR>")
+    b.select("routine","analytics.calc","102")
+    b.press("<CR>")
+    assert(b.sources[1]=="102", "wrong overloaded source opened")
+    assert(vim.bo[vim.api.nvim_get_current_buf()].readonly,"routine source must stay readonly")
+    b.select("schema","metrics");b.press("zo")
+    b.select("table",long_name)
+    assert(#b.columns==0 and #b.queries==0,"group expansion performed data/column I/O")
+  end)
+end)
+
+test("L opens partition structure while explicit l alone fetches columns",function()
+  with_browser(function(b)
+    b.press("L")
+    b.select("table","archive.capacity_p_2026_08_17")
+    assert(#b.columns==0 and #b.queries==0,"expand-all eagerly loaded table metadata")
+    b.select("table",long_name);b.press("l")
+    assert(#b.columns==1 and b.columns[1]==long_name)
+    assert(#b.queries==0,"column expansion issued an exact COUNT")
+    b.select("column","id");b.press("zc")
+    assert(b.current().kind=="table" and b.current().name==long_name,"collapse did not restore parent selection")
+  end)
+end)
+
+test("search reveals hidden descendants and F restores original selection and folds",function()
+  with_browser(function(b)
+    b.select("schema","metrics")
+    b.filter("capacity_p_2026_08_17")
+    assert(b.current().name=="archive.capacity_p_2026_08_17","search selected an ancestor")
+    b.press("<CR>")
+    assert(b.opened[1]=="archive.capacity_p_2026_08_17")
+    b.filter("calc(value text)")
+    assert(b.current().source_id=="102","routine overload search lost identity")
+    b.press("h")
+    b.press("F")
+    assert(b.state.filter==nil and b.current().kind=="schema" and b.current().name=="metrics")
+    assert(next(b.state.groups_expanded)==nil and next(b.state.expanded)==nil,"temporary search changed saved folds")
+    assert(#b.columns==0 and #b.queries==0)
+  end)
+end)
+
+test("cancelled search preserves the active term and selection",function()
+  with_browser(function(b)
+    b.filter("calc(value integer)")
+    b.filter(nil)
+    assert(b.state.filter=="calc(value integer)" and b.current().source_id=="101")
+  end)
+end)
+
+test("complete Unicode labels survive horizontal scrolling and table actions",function()
+  with_browser(function(b)
+    b.select("schema","metrics");b.press("l")
+    b.select("table",long_name)
+    local found=false
+    for _,line in ipairs(b.lines()) do if line:find(long_name,1,true) then found=true end end
+    assert(found,"buffer label permanently lost the suffix")
+    assert(not vim.wo[b.win].wrap)
+    vim.cmd("normal! zL")
+    local offset=vim.fn.winsaveview().leftcol
+    assert(offset>0,"native horizontal scroll did not reveal full label")
+    b.press("l")
+    assert(vim.fn.winsaveview().leftcol==offset,"render reset horizontal position")
+    assert(b.current().name==long_name,"horizontal offset changed selected object")
+    b.press("<CR>")
+    assert(b.opened[1]==long_name,"truncated display became an action target")
+  end)
+end)
+
+test("legacy flat buffer also retains the complete label beyond the window edge",function()
+  with_browser(function(b)
+    b.state.items={{name=long_name,type="table"}}
+    b.state.routines={}
+    b.press("F")
+    b.select("table",long_name)
+    local full=false
+    for _,line in ipairs(b.lines()) do if line:find(long_name,1,true) then full=true end end
+    assert(full,"legacy renderer permanently ellipsized the buffer label")
+  end)
+end)
+
+test("group rows cannot trigger relation-specific actions",function()
+  with_browser(function(b)
+    b.select("schema","metrics")
+    b.press("<S-CR>");b.press("go");b.press("D")
+    assert(#b.opened==0 and #b.columns==0 and #b.queries==0)
+    b.press("l");b.select("table",long_name);b.press("l")
+    b.select("partitions",long_name)
+    b.press("<S-CR>");b.press("go");b.press("D")
+    assert(#b.opened==0 and #b.queries==0)
+  end)
+end)
+
+test("H moves a hidden leaf selection to its surviving schema",function()
+  with_browser(function(b)
+    b.press("L")
+    b.select("table","archive.capacity_p_2026_08_17")
+    b.press("H")
+    assert(b.current().kind=="schema" and b.current().name=="metrics")
+  end)
+end)
+
+test("h from a horizontally scrolled closed table reveals its schema label",function()
+  with_browser(function(b)
+    b.select("schema","metrics");b.press("l")
+    b.select("table",long_name)
+    vim.cmd("normal! $")
+    assert(vim.fn.winsaveview().leftcol>0)
+    b.press("h")
+    assert(b.current().kind=="schema" and b.current().name=="metrics")
+    assert(vim.fn.winsaveview().leftcol==0,"ancestor navigation hid the short schema label")
+    vim.cmd("normal! jj")
+    assert(b.current().name==long_name and vim.fn.winsaveview().leftcol==0,"ancestor retained the old end-of-line cursor goal")
+  end)
+end)
+
+test("n and N visit real routines alongside tables",function()
+  with_browser(function(b)
+    b.press("L")
+    b.select("routine","analytics.calc","102")
+    b.press("n")
+    assert(b.current().kind=="routine" and b.current().source_id=="103")
+    b.press("N")
+    assert(b.current().source_id=="102")
+  end)
+end)
+
+print(string.format("schema_browser_spec: %d passed, %d failed",pass,fail))
+if fail>0 then os.exit(1) end

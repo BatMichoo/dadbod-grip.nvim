@@ -1,0 +1,6 @@
+\set ON_ERROR_STOP on
+DROP SCHEMA IF EXISTS grip_live CASCADE;
+DROP SCHEMA IF EXISTS grip_live_archive CASCADE;
+DROP SCHEMA IF EXISTS grip_live_hidden CASCADE;
+DROP ROLE IF EXISTS grip_live_reader;
+DROP ROLE IF EXISTS grip_live_full;
