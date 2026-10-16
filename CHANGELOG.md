@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-10-16
+
+### Added
+
+- The schema browser groups tables, views, functions, and procedures under
+  collapsed schemas when schema metadata is available. PostgreSQL partitions
+  appear beneath their actual parents, including nested and cross-schema
+  partitions. Objects with unknown schema metadata remain in flat sections.
+  Search finds hidden objects and routine signatures, then restores
+  the previous folds and view when cleared.
+
+### Changed
+
+- Sidebar labels retain complete names and signatures for native horizontal
+  scrolling. `L` opens schema and partition groups without fetching every
+  table's columns. Expanding columns no longer runs an exact row count.
+
 ## [3.11.1] - 2026-10-15
 
 ### Fixed
@@ -670,7 +687,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.11.1...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.12.0...HEAD
+[3.12.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.12.0
 [3.11.1]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.11.1
 [3.11.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.11.0
 [3.10.2]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.2

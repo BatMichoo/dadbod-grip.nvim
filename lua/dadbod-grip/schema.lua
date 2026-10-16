@@ -61,14 +61,6 @@ local function abbrev_type(dtype)
   return dtype
 end
 
---- Right-truncate a table name to fit within max_cols display columns.
---- Preserves the left side (schema prefix) and appends an ellipsis suffix.
---- Returns label unchanged when it already fits.
-local function truncate_name(label, max_cols)
-  if vim.fn.strdisplaywidth(label) <= max_cols then return label end
-  return label:sub(1, math.max(1, max_cols - 1)) .. "\xe2\x80\xa6"
-end
-
 local filetypes = require("dadbod-grip.filetypes")
 
 --- Returns true when the URL is a file path or remote file (not a DB connection).
@@ -87,11 +79,11 @@ local function get_state(url)
       items = nil,       -- { {name, type}, ... }: nil = not fetched
       routines = nil,    -- { {name, display, type}, ... }: nil = not fetched
       file_cols = nil,   -- for file-as-table: { {column_name, data_type}, ... }
-      expanded = {},      -- set of expanded table names
+      expanded = {},      -- column folds, independent from schema/partition folds
+      groups_expanded = {},
       col_cache = {},        -- table_name → column_info[]
       pk_cache = {},         -- table_name → set
       fk_cache = {},         -- table_name → fk_info[]
-      row_count_cache = {},  -- table_name → number
       nodes = {},         -- flat rendered node list
       filter = nil,       -- search filter string
     }
@@ -109,6 +101,10 @@ local function fetch_tables(state)
   state.items = tables
   local routines = db.list_routines(state.url)
   state.routines = routines or {}
+  -- DuckDB's adapter deliberately omits .schema for its known main-schema rows.
+  -- Other missing metadata conveys no ownership, including bare PostgreSQL names.
+  state.default_schema = require("dadbod-grip.adapters").kind(db.resolved_url(state.url)) == "duckdb" and "main" or nil
+  require("dadbod-grip.schema_tree").prune(state)
 end
 
 --- Fetch column schema for a file-as-table URL (Parquet, CSV, remote file).
@@ -154,30 +150,6 @@ local function ensure_columns(state, table_name)
   state.fk_cache[table_name] = fk_map
 end
 
---- Fetch row count for a table (lazy, cached). Independent of ensure_columns so
---- it can retry on its own if the first attempt fails (e.g. transient error).
---- Quotes each dot-separated component separately so federated names like
---- "supplier.orders" become "supplier"."orders" not "supplier.orders".
-local function ensure_row_count(state, table_name)
-  if state.row_count_cache[table_name] ~= nil then return end
-  local parts = vim.split(table_name, ".", { plain = true })
-  for i, p in ipairs(parts) do
-    parts[i] = '"' .. p:gsub('"', '""') .. '"'
-  end
-  local res = db.query("SELECT COUNT(*) FROM " .. table.concat(parts, "."), state.url)
-  if res and res.rows and res.rows[1] then
-    state.row_count_cache[table_name] = tonumber(res.rows[1][1]) or 0
-  end
-end
-
---- Format a row count for compact sidebar display.
-local function fmt_count(n)
-  if n >= 1e9 then return string.format("%.1fB", n / 1e9) end
-  if n >= 1e6 then return string.format("%.1fM", n / 1e6) end
-  if n >= 1e3 then return string.format("%.1fK", n / 1e3) end
-  return tostring(n)
-end
-
 --- Build flat node list from state.
 local function build_nodes(state)
   local nodes = {}
@@ -188,13 +160,13 @@ local function build_nodes(state)
     local expanded = state.expanded["__file__"] ~= false  -- default expanded
     table.insert(nodes, { kind = "header", text = "File" })
     table.insert(nodes, {
-      kind = "table", name = fname, expanded = expanded,
+      kind = "table", id = "file", name = fname, expanded = expanded,
       is_file = true, file_key = "__file__",
     })
     if expanded then
       for _, col in ipairs(state.file_cols) do
         table.insert(nodes, {
-          kind = "column",
+          kind = "column", id = "file\0column\0" .. col.column_name, parent = "file",
           name = col.column_name,
           dtype = abbrev_type(col.data_type),
           pk = false, fk = false,
@@ -208,314 +180,124 @@ local function build_nodes(state)
   end
 
   if not state.items then return nodes end
-
-  -- Check if any items have schema grouping (cross-database federation)
-  local has_schemas = false
-  for _, item in ipairs(state.items) do
-    if item.schema then has_schemas = true; break end
-  end
-
-  if has_schemas then
-    -- Group by schema, then tables/views within each schema
-    local schema_order = {}
-    local by_schema = {}
-    for _, item in ipairs(state.items) do
-      if state.filter then
-        local base = item.name:match("%.(.+)$") or item.name
-        if not base:lower():find(state.filter:lower(), 1, true) then
-          goto continue_schema
-        end
-      end
-      local s = item.schema or "main"
-      if not by_schema[s] then
-        by_schema[s] = {}
-        table.insert(schema_order, s)
-      end
-      table.insert(by_schema[s], item)
-      ::continue_schema::
-    end
-
-    for si, schema_name in ipairs(schema_order) do
-      local items = by_schema[schema_name]
-      if si > 1 then table.insert(nodes, { kind = "sep" }) end
-      table.insert(nodes, { kind = "header", text = schema_name .. " (" .. #items .. ")" })
-
-      for _, item in ipairs(items) do
-        local display = item.name:match("%.(.+)$") or item.name
-        local expanded = state.expanded[item.name] or false
-        table.insert(nodes, { kind = "table", name = item.name, display = display, type = item.type, expanded = expanded })
-
-        if expanded then
-          ensure_columns(state, item.name)
-          ensure_row_count(state, item.name)
-          local cols = state.col_cache[item.name] or {}
-          local pk_set = state.pk_cache[item.name] or {}
-          local fk_map = state.fk_cache[item.name] or {}
-
-          for _, col in ipairs(cols) do
-            local is_pk = pk_set[col.column_name] or false
-            local is_fk = fk_map[col.column_name] ~= nil
-            table.insert(nodes, {
-              kind = "column",
-              name = col.column_name,
-              dtype = abbrev_type(col.data_type),
-              pk = is_pk,
-              fk = is_fk,
-              fk_ref = fk_map[col.column_name],
-              table_name = item.name,
-            })
-          end
-        end
-      end
-    end
-  else
-    -- Original flat layout: Tables section, then Views section
-    local tables = {}
-    local views = {}
-    for _, item in ipairs(state.items) do
-      if state.filter then
-        if not item.name:lower():find(state.filter:lower(), 1, true) then
-          goto continue
-        end
-      end
-      if item.type == "view" then
-        table.insert(views, item)
-      else
-        table.insert(tables, item)
-      end
-      ::continue::
-    end
-
-    if #tables > 0 then
-      table.insert(nodes, { kind = "header", text = "Tables (" .. #tables .. ")" })
-      for _, item in ipairs(tables) do
-        local expanded = state.expanded[item.name] or false
-        table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
-
-        if expanded then
-          ensure_columns(state, item.name)
-          ensure_row_count(state, item.name)
-          local cols = state.col_cache[item.name] or {}
-          local pk_set = state.pk_cache[item.name] or {}
-          local fk_map = state.fk_cache[item.name] or {}
-
-          for _, col in ipairs(cols) do
-            local is_pk = pk_set[col.column_name] or false
-            local is_fk = fk_map[col.column_name] ~= nil
-            table.insert(nodes, {
-              kind = "column",
-              name = col.column_name,
-              dtype = abbrev_type(col.data_type),
-              pk = is_pk,
-              fk = is_fk,
-              fk_ref = fk_map[col.column_name],
-              table_name = item.name,
-            })
-          end
-        end
-      end
-    end
-
-    if #views > 0 then
-      if #tables > 0 then
-        table.insert(nodes, { kind = "sep" })
-      end
-      table.insert(nodes, { kind = "header", text = "Views (" .. #views .. ")" })
-      for _, item in ipairs(views) do
-        local expanded = state.expanded[item.name] or false
-        table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
-
-        if expanded then
-          ensure_columns(state, item.name)
-          ensure_row_count(state, item.name)
-          local cols = state.col_cache[item.name] or {}
-          for _, col in ipairs(cols) do
-            table.insert(nodes, {
-              kind = "column",
-              name = col.column_name,
-              dtype = abbrev_type(col.data_type),
-              pk = false,
-              fk = false,
-              table_name = item.name,
-            })
-          end
-        end
-      end
+  local tree = require("dadbod-grip.schema_tree")
+  nodes = tree.build(state)
+  local loaded = false
+  for _, node in ipairs(nodes) do
+    if node.kind == "table" and node.columns_expanded and not state.col_cache[node.name] then
+      ensure_columns(state, node.name)
+      loaded = true
     end
   end
-
-  if state.routines and #state.routines > 0 then
-    local functions = {}
-    local procedures = {}
-    for _, routine in ipairs(state.routines) do
-      local display = routine.display or routine.name
-      if state.filter then
-        local needle = state.filter:lower()
-        local hay_name = (routine.name or ""):lower()
-        local hay_display = (display or ""):lower()
-        if not hay_name:find(needle, 1, true) and not hay_display:find(needle, 1, true) then
-          goto continue_routine
-        end
-      end
-      if routine.type == "procedure" then
-        table.insert(procedures, routine)
-      else
-        table.insert(functions, routine)
-      end
-      ::continue_routine::
-    end
-
-    local function add_routines(header, routines)
-      if #routines == 0 then return end
-      if #nodes > 0 then table.insert(nodes, { kind = "sep" }) end
-      table.insert(nodes, { kind = "header", text = header .. " (" .. #routines .. ")" })
-      for _, routine in ipairs(routines) do
-        table.insert(nodes, {
-          kind = "routine",
-          name = routine.name,
-          display = routine.display or routine.name,
-          type = routine.type or "function",
-          source_id = routine.source_id,
-        })
-      end
-    end
-
-    add_routines("Functions", functions)
-    add_routines("Procedures", procedures)
+  if loaded then nodes = tree.build(state) end
+  for _, node in ipairs(nodes) do
+    if node.kind == "column" then node.dtype = abbrev_type(node.data_type) end
   end
-
   state.nodes = nodes
   return nodes
 end
 
---- Render nodes into buffer lines + highlights.
-local function render(state)
+--- Snapshot stable identity and native window view before changing the projection.
+local function selection(state)
+  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return nil end
+  local view = vim.api.nvim_win_call(_sidebar_winid, vim.fn.winsaveview)
+  local node = state.nodes[view.lnum - (state.rendered_filter and 4 or 2)]
+  local ids, by_id = {}, {}
+  for _, candidate in ipairs(state.nodes) do if candidate.id then by_id[candidate.id] = candidate end end
+  while node and node.id do
+    ids[#ids + 1] = node.id
+    node = by_id[node.parent]
+  end
+  return {ids = ids, view = view}
+end
+
+local function restore_selection(state, anchor)
+  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
+  local offset, target, same = state.filter and 4 or 2, nil, false
+  for n, id in ipairs(anchor and anchor.ids or {}) do
+    for i, node in ipairs(state.nodes) do
+      if node.id == id then target, same = i, n == 1; break end
+    end
+    if target then break end
+  end
+  if not target then
+    for i, node in ipairs(state.nodes) do
+      if node.kind ~= "header" and node.kind ~= "sep" then target = i; break end
+    end
+  end
+  local view = same and vim.deepcopy(anchor.view) or {col = 0, leftcol = 0, curswant = 0, coladd = 0}
+  view.lnum = (target or 1) + offset
+  if same then
+    -- Keep the selected object in the same viewport position when rows above change.
+    view.topline = math.max(1, (view.topline or 1) + view.lnum - anchor.view.lnum)
+  end
+  vim.api.nvim_win_call(_sidebar_winid, function() vim.fn.winrestview(view) end)
+end
+
+--- Render complete buffer labels; the window viewport handles horizontal clipping.
+local function render(state, anchor)
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
-
+  anchor = anchor or selection(state)
   local nodes = build_nodes(state)
-  local lines = {}
-  local highlights = {}
-
-  -- Title: file name for file-as-table, connection name for DB connections
+  local lines, highlights = {}, {}
+  local function line(text, hl)
+    lines[#lines + 1] = text
+    if hl then highlights[#highlights + 1] = {line = #lines - 1, col = 0, end_col = #text, hl = hl} end
+  end
   local title
   if state.file_cols ~= nil then
     title = state.url:match("[^/\\]+$") or state.url
-    if #title > 34 then title = "…" .. title:sub(-33) end
   else
-    local connections = require("dadbod-grip.connections")
-    local current = connections.current()
+    local current = require("dadbod-grip.connections").current()
     title = current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
   end
-  table.insert(lines, " " .. title)
-  -- The connection accent, so a connection saved with "color" is identifiable
-  -- from the sidebar title alone. Unaccented it is GripBorder's violet, which
-  -- is what this line has always been.
-  table.insert(highlights, { line = 0, col = 0, end_col = #lines[1], hl = "GripConnAccentBold" })
-
-  table.insert(lines, "")
-
-  if state.filter then
-    table.insert(lines, " / " .. state.filter)
-    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "Search" })
-    table.insert(lines, "")
-  end
-
-  -- Pre-compute per-table max column name display width for type alignment.
-  local tbl_max_col_w = {}
-  local _cur_tbl = nil
+  line(" " .. title, "GripConnAccentBold")
+  line("")
+  if state.filter then line(" / " .. state.filter, "Search"); line("") end
+  local widths = {}
   for _, node in ipairs(nodes) do
-    if node.kind == "table" then
-      _cur_tbl = node.name
-      tbl_max_col_w[node.name] = tbl_max_col_w[node.name] or 0
-    elseif node.kind == "column" and _cur_tbl then
-      local w = vim.fn.strdisplaywidth(node.name)
-      if w > tbl_max_col_w[_cur_tbl] then tbl_max_col_w[_cur_tbl] = w end
+    if node.kind == "column" then
+      widths[node.table_name] = math.max(widths[node.table_name] or 0, vim.fn.strdisplaywidth(node.name))
     end
   end
-
-  local cur_tbl = nil
   for _, node in ipairs(nodes) do
-    if node.kind == "sep" then
-      table.insert(lines, "")
-    elseif node.kind == "header" then
-      table.insert(lines, " " .. node.text)
-      table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripHeader" })
+    local indent = string.rep("  ", node.depth or 0)
+    if node.kind == "header" then
+      line(indent .. " " .. node.text, "GripHeader")
+    elseif node.kind == "schema" or node.kind == "partitions" then
+      local label = node.kind == "schema" and node.name or ("Partitions (" .. node.count .. ")")
+      line(indent .. (node.expanded and " ▼ " or " ▶ ") .. label, "GripHeader")
     elseif node.kind == "table" then
-      cur_tbl = node.name
-      local arrow = node.expanded and " ▼ " or " ▶ "
-      local label = node.display or node.name
-      local cached_count = state.row_count_cache and state.row_count_cache[node.name]
-      local count_str = (cached_count ~= nil) and (" (" .. fmt_count(cached_count) .. ")") or ""
-      local win_width = (_sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid))
-          and vim.api.nvim_win_get_width(_sidebar_winid)
-          or SIDEBAR_MAX_WIDTH
-      local max_name = win_width - 3 - #count_str
-      local display_name = truncate_name(label, max_name)
-      table.insert(lines, arrow .. display_name .. count_str)
-      -- No special hl for table names: keep it clean
+      line(indent .. (node.expanded and " ▼ " or " ▶ ") .. (node.display or node.name))
     elseif node.kind == "column" then
-      -- All prefixes are 6 display cols wide.
-      local prefix
-      if node.pk and node.fk then prefix = "  🔑🔗"   -- 2 + 2 + 2 = 6
-      elseif node.pk           then prefix = "   🔑 "  -- 3 + 2 + 1 = 6
-      elseif node.fk           then prefix = "   🔗 "  -- 3 + 2 + 1 = 6
-      else                          prefix = "      "  -- 6 spaces
-      end
-      local max_w   = tbl_max_col_w[cur_tbl] or 16
-      local name_dw = vim.fn.strdisplaywidth(node.name)
-      local pad     = string.rep(" ", math.max(1, max_w - name_dw + 2))
-      local line    = prefix .. " " .. node.name .. pad .. node.dtype
-      table.insert(lines, line)
-      -- Highlight type dim (byte offsets)
-      local type_start = #prefix + 1 + #node.name + #pad
-      table.insert(highlights, { line = #lines - 1, col = type_start, end_col = #lines[#lines], hl = "GripReadonly" })
-      if node.pk then
-        table.insert(highlights, { line = #lines - 1, col = 2, end_col = 2 + #"🔑", hl = "GripBoolTrue" })
-      end
-      if node.fk then
-        local fk_start = node.pk and 2 + #"🔑" or 3
-        table.insert(highlights, { line = #lines - 1, col = fk_start, end_col = fk_start + #"🔗", hl = "GripUrl" })
-      end
+      local marker = node.pk and (node.fk and "🔑🔗" or "🔑 ") or (node.fk and " 🔗" or "   ")
+      local prefix = indent .. "  " .. marker .. " "
+      local pad = string.rep(" ", math.max(1, (widths[node.table_name] or 0) - vim.fn.strdisplaywidth(node.name) + 2))
+      line(prefix .. node.name .. pad .. node.dtype)
+      highlights[#highlights + 1] = {line = #lines - 1, col = #prefix + #node.name + #pad,
+        end_col = #lines[#lines], hl = "GripReadonly"}
     elseif node.kind == "routine" then
-      local icon = node.type == "procedure" and " ◇ " or " ƒ "
-      local win_width = (_sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid))
-          and vim.api.nvim_win_get_width(_sidebar_winid)
-          or SIDEBAR_MAX_WIDTH
-      local display_name = truncate_name(node.display or node.name, math.max(1, win_width - 3))
-      table.insert(lines, icon .. display_name)
-      table.insert(highlights, { line = #lines - 1, col = 1, end_col = #icon, hl = "GripUrl" })
+      line(indent .. (node.type == "procedure" and " ◇ " or " ƒ ") .. (node.display or node.name))
     elseif node.kind == "sep" then
-      table.insert(lines, "")
+      line("")
     end
   end
-
   if #nodes == 0 and state.items then
-    table.insert(lines, "")
-    table.insert(lines, " (no tables found)")
-    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
+    line(state.filter and " (no matches)" or " (no objects found)", "GripReadonly")
   end
-
-  -- Hint line at bottom
-  table.insert(lines, "")
-  table.insert(lines, " 1:conn 2:pad 3:grid")
-  table.insert(lines, " <CR> / F ?")
-  table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-
+  line("")
+  line(" 1:conn 2:pad 3:grid", "GripReadonly")
+  line(" <CR> / F ?  zh/zl", "GripReadonly")
   vim.bo[_sidebar_bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(_sidebar_bufnr, 0, -1, false, lines)
   vim.bo[_sidebar_bufnr].modifiable = false
-
-  -- Apply highlights
   local ns = vim.api.nvim_create_namespace("grip_schema")
   vim.api.nvim_buf_clear_namespace(_sidebar_bufnr, ns, 0, -1)
   for _, hl in ipairs(highlights) do
-    -- Ranges are byte offsets into lines[hl.line + 1]; add_highlight used to
-    -- clamp them silently, set_extmark raises instead, so clamp before asking.
-    local line_len = #(lines[hl.line + 1] or "")
-    pcall(vim.api.nvim_buf_set_extmark, _sidebar_bufnr, ns, hl.line, math.min(hl.col, line_len), {
-      end_col = math.min(hl.end_col, line_len), hl_group = hl.hl,
-    })
+    vim.api.nvim_buf_set_extmark(_sidebar_bufnr, ns, hl.line, hl.col, {end_col = hl.end_col, hl_group = hl.hl})
   end
+  state.rendered_filter = state.filter
+  restore_selection(state, anchor)
 end
 
 --- Get the node at the current cursor line.
@@ -592,18 +374,6 @@ local function node_offset(state)
   return state.filter and 4 or 2
 end
 
---- Move sidebar cursor to first table node.
-local function jump_to_first_table(state)
-  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
-  local offset = node_offset(state)
-  for i, node in ipairs(state.nodes) do
-    if node.kind == "table" then
-      pcall(vim.api.nvim_win_set_cursor, _sidebar_winid, { offset + i, 0 })
-      return
-    end
-  end
-end
-
 --- Navigate to next (+1) or prev (-1) table node, wrapping at ends.
 local function jump_to_next_table(state, direction)
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
@@ -611,7 +381,7 @@ local function jump_to_next_table(state, direction)
   local cur_line = vim.api.nvim_win_get_cursor(_sidebar_winid)[1]
   local tlines = {}
   for i, node in ipairs(state.nodes) do
-    if node.kind == "table" then table.insert(tlines, offset + i) end
+    if node.kind == "table" or node.kind == "routine" then table.insert(tlines, offset + i) end
   end
   if #tlines == 0 then return end
   if direction > 0 then
@@ -637,11 +407,23 @@ local function setup_keymaps(url)
 
   local state = get_state(url)
 
+  local function groups() return state.filter and state.search_groups or state.groups_expanded end
+  local function columns() return state.filter and state.search_columns or state.expanded end
+  local function is_group(node) return node.kind == "schema" or node.kind == "partitions" end
+  local function clear_filter()
+    local anchor = state.search_restore or selection(state)
+    state.filter, state.search_groups, state.search_columns, state.search_restore = nil, nil, nil, nil
+    render(state, anchor)
+  end
+
   -- Open table / expand column (reuses existing grid window)
   kmap("sidebar_open", function()
     local node = node_at_cursor(state)
     if not node then return end
-    if node.is_file then
+    if is_group(node) then
+      groups()[node.id] = not node.expanded
+      render(state)
+    elseif node.is_file then
       if node.kind == "table" then
         -- File table node: focus grid if open, otherwise open the file
         local view_mod = require("dadbod-grip.view")
@@ -680,80 +462,73 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- Expand
-  kmap("sidebar_expand", function()
-    local node = node_at_cursor(state)
-    if not node or node.kind ~= "table" or node.expanded then return end
-    local key = node.file_key or node.name
-    state.expanded[key] = true
-    render(state)
-  end)
-  kmap("sidebar_expand_z", function()
-    local node = node_at_cursor(state)
-    if node and node.kind == "table" then
-      state.expanded[node.name] = true
-      render(state)
-    end
-  end)
-
-  -- Collapse
-  kmap("sidebar_collapse", function()
+  local function expand()
     local node = node_at_cursor(state)
     if not node then return end
-    if node.kind == "table" and node.expanded then
-      local key = node.file_key or node.name
-      state.expanded[key] = false
-      render(state)
-    elseif node.kind == "column" and node.table_name then
-      local key = node.file_key and "__file__" or node.table_name
-      state.expanded[key] = false
-      render(state)
-    end
-  end)
-  kmap("sidebar_collap_z", function()
+    if is_group(node) then groups()[node.id] = true
+    elseif node.kind == "table" then columns()[node.file_key or node.name] = true
+    else return end
+    render(state)
+  end
+  local function collapse()
     local node = node_at_cursor(state)
-    if not node or node.kind ~= "table" then return end
-    local key = node.file_key or node.name
-    state.expanded[key] = false
-    render(state)
-  end)
+    if not node then return end
+    local anchor = selection(state)
+    if is_group(node) and node.expanded then
+      groups()[node.id] = false
+    elseif node.kind == "table" and node.expanded then
+      columns()[node.file_key or node.name] = false
+      if node.partition_id then groups()[node.partition_id] = false end
+    elseif node.kind == "column" then
+      columns()[node.is_file and "__file__" or node.table_name] = false
+    else
+      -- A root has no ancestor; collapsing it must not jump to another object.
+      if not anchor.ids[2] then return end
+      table.remove(anchor.ids, 1)
+      anchor.view.col, anchor.view.leftcol, anchor.view.curswant, anchor.view.coladd = 0, 0, 0, 0
+    end
+    render(state, anchor)
+  end
+  kmap("sidebar_expand", expand)
+  kmap("sidebar_expand_z", expand)
+  kmap("sidebar_collapse", collapse)
+  kmap("sidebar_collap_z", collapse)
 
-  -- Expand all
   kmap("sidebar_expand_all", function()
-    if not state.items then return end
-    for _, item in ipairs(state.items) do
-      state.expanded[item.name] = true
+    if state.file_cols then columns()["__file__"] = true
+    else
+      for _, id in ipairs(require("dadbod-grip.schema_tree").containers(state)) do groups()[id] = true end
     end
     render(state)
   end)
-
-  -- Collapse all
   kmap("sidebar_collap_all", function()
-    for k in pairs(state.expanded) do
-      state.expanded[k] = false
+    for key in pairs(columns()) do columns()[key] = false end
+    if state.file_cols then columns()["__file__"] = false
+    else
+      for _, id in ipairs(require("dadbod-grip.schema_tree").containers(state)) do groups()[id] = false end
     end
     render(state)
   end)
 
-  -- Filter/search: blank clears the filter, so an empty answer is not a cancel.
   kmap("sidebar_filter", function()
-    local input = ui.input({
-      prompt = "Filter: ", default = state.filter or "", allow_empty = true,
-    })
-    if not input then return end
-    state.filter = (input ~= "") and input or nil
+    local anchor = selection(state)
+    local input = ui.input({prompt = "Filter: ", default = state.filter or "", allow_empty = true})
+    -- input() leaves its prompt echoed on the command line after completion.
+    vim.api.nvim_echo({}, false, {})
+    if input == nil then return end
+    if input == "" then clear_filter(); return end
+    if not state.filter then state.search_restore = anchor end
+    state.filter, state.search_groups, state.search_columns = input, {}, {}
     render(state)
-    if state.filter then
-      vim.schedule(function() jump_to_first_table(state) end)
+    for i, node in ipairs(state.nodes) do
+      if node.matched then
+        vim.api.nvim_win_set_cursor(_sidebar_winid, {node_offset(state) + i, 0})
+        vim.api.nvim_win_call(_sidebar_winid, function() vim.fn.winrestview({leftcol = 0}) end)
+        break
+      end
     end
   end)
-
-  -- sidebar_filter_c: clear filter and jump to first table
-  kmap("sidebar_filter_c", function()
-    state.filter = nil
-    render(state)
-    vim.schedule(function() jump_to_first_table(state) end)
-  end)
+  kmap("sidebar_filter_c", clear_filter)
 
   -- next/prev table node (wraps)
   kmap("sidebar_next", function() jump_to_next_table(state, 1) end)
@@ -766,7 +541,6 @@ local function setup_keymaps(url)
       state.col_cache = {}
       state.pk_cache = {}
       state.fk_cache = {}
-      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -911,7 +685,6 @@ local function setup_keymaps(url)
       state.items = nil
       state.routines = nil
       state.col_cache = {}
-      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -924,7 +697,6 @@ local function setup_keymaps(url)
     ddl.create_table(url, function()
       state.items = nil
       state.col_cache = {}
-      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -996,8 +768,8 @@ local function setup_keymaps(url)
   -- er_diagram: ER diagram float (scroll to table under cursor if on a table node)
   kmap("er_diagram", function()
     local node = node_at_cursor(state)
-    local tbl  = node and node.kind == "table" and node.name
-    require("dadbod-grip.er_diagram").toggle(url, tbl, { focus = tbl ~= nil })
+    local tbl = node and ((node.kind == "table" and node.name) or (node.kind == "column" and node.table_name))
+    if tbl then require("dadbod-grip.er_diagram").toggle(url, tbl, { focus = true }) end
   end)
 
   kmap("sidebar_close", function() M.close() end)
@@ -1016,14 +788,17 @@ local function setup_keymaps(url)
       "",
       "  Navigation",
       "  j/k       Move between items",
-      "  <CR>      Open table in grid (reuse win)",
+      "  <CR>      Open object / toggle group",
       "  S-CR      Open table in new split",
-      "  l / zo    Expand table columns",
-      "  h / zc    Collapse table",
-      "  L         Expand all",
-      "  H         Collapse all",
-      "  /         Filter by name",
-      "  F         Clear filter",
+      "  l / zo    Expand group or table columns",
+      "  h / zc    Collapse / move to parent",
+      "  L         Expand all schema/partition levels",
+      "  H         Collapse groups and columns",
+      "  /         Search hidden names/signatures",
+      "  F         Clear filter, restore view",
+      "  zh/zl     Scroll labels horizontally",
+      "  zH/zL     Scroll labels by half a window",
+      "  0 / $     Move to start / end of label",
       "",
       "  Tab Views",
       "  1         Connections picker",
@@ -1205,8 +980,9 @@ function M.toggle(url)
     vim.bo[_sidebar_bufnr].swapfile = false
     vim.bo[_sidebar_bufnr].filetype = "grip_schema"
     vim.api.nvim_buf_set_name(_sidebar_bufnr, "grip://schema")
-    setup_keymaps(url)
   end
+  -- The buffer is reused across connections; callbacks must bind the current URL.
+  setup_keymaps(url)
 
   -- Open left split, restoring previous width if available
   local width = _sidebar_saved_width or sidebar_width()
@@ -1221,6 +997,9 @@ function M.toggle(url)
   vim.wo[_sidebar_winid].cursorline = true
   vim.wo[_sidebar_winid].winfixwidth = true
   vim.wo[_sidebar_winid].wrap = false
+  vim.wo[_sidebar_winid].sidescrolloff = 0
+  vim.wo[_sidebar_winid].list = true
+  vim.wo[_sidebar_winid].listchars = "extends:…,precedes:…"
 
   render(state)
 end
@@ -1269,7 +1048,6 @@ end
 M._clamp_sidebar_width = clamp_sidebar_width
 M._sidebar_width_for = sidebar_width_for
 
-M._truncate_name = truncate_name
 M._build_nodes = build_nodes
 
 --- Refresh sidebar if visible (e.g., after connection switch).
@@ -1283,7 +1061,6 @@ function M.refresh(url)
   state.col_cache = {}
   state.pk_cache = {}
   state.fk_cache = {}
-  state.row_count_cache = {}
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   if is_file_url(url) then
