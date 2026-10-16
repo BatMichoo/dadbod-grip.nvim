@@ -200,6 +200,51 @@ test("get_cell: value is nil for NULL original cell (fk-follow NULL guard)", fun
   cleanup()
 end)
 
+-- ── refresh while a metadata view is showing ────────────────────────────────
+-- `r` re-runs the records query. On the Columns view it used to paint those
+-- records under the "Columns" badge; the view itself must reload instead.
+
+test("apply_records: refresh on a metadata view reloads that view", function()
+  cleanup()
+  local db_mod = require("dadbod-grip.db")
+  local orig_cols = db_mod.get_column_info
+  local col_calls = 0
+  db_mod.get_column_info = function()
+    col_calls = col_calls + 1
+    return { { column_name = "id", data_type = "integer", is_nullable = "NO" } }
+  end
+
+  local ok, err = pcall(function()
+    local st = data.new({
+      columns = { "id" }, rows = { { "1" } }, primary_keys = { "id" },
+      table_name = "orders", url = "sqlite:tests/seed_sqlite.db",
+    })
+    local bufnr = view.open(st, st.url, "SELECT * FROM orders", {})
+    view.switch_view(bufnr, "columns")
+    eq(col_calls, 1, "columns fetched on switch")
+
+    local fresh = data.new({
+      columns = { "id" }, rows = { { "1" }, { "2" } }, primary_keys = { "id" },
+      table_name = "orders", url = "sqlite:tests/seed_sqlite.db",
+    })
+    view.apply_records(bufnr, fresh)
+
+    local session = view._sessions[bufnr]
+    eq(col_calls, 2, "columns re-fetched on refresh")
+    eq(session.current_view, "columns", "still on the columns view")
+    eq(session._records_state, fresh, "fresh rows kept as the records")
+    local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+    assert(text:find("column_name", 1, true), "columns view still rendered:\n" .. text)
+
+    view.switch_view(bufnr, "records")
+    eq(#view._sessions[bufnr].state.rows, 2, "records view shows the refreshed rows")
+  end)
+
+  db_mod.get_column_info = orig_cols
+  cleanup()
+  if not ok then error(err) end
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nview_spec: %d passed, %d failed", pass, fail))

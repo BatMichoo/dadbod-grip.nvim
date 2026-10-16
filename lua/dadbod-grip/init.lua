@@ -805,7 +805,7 @@ local function apply_refresh(bufnr, fetched)
     session.elapsed_ms = fetched.elapsed_ms
     session.last_action = "query"
   end
-  view.render(bufnr, new_state)
+  view.apply_records(bufnr, new_state)
 end
 
 local function do_refresh(bufnr, url, query_sql, table_name)

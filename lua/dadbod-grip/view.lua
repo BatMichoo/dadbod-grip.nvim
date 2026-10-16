@@ -2103,14 +2103,15 @@ local VIEW_FETCHERS = {
 
 --- Switch the current grip buffer to a different view facet.
 --- view_name: "records"|"columns"|"fk"|"indexes"|"constraints"|"stats"|"history"|"explain"
-function M.switch_view(bufnr, view_name)
+--- opts.force = true re-fetches the view even when it is already showing.
+function M.switch_view(bufnr, view_name, opts)
   local session = M._sessions[bufnr]
   if not session then return end
 
   -- Already on this view: show hint rather than silently re-fetching
   -- (history is excluded: it's a picker, re-opening it is fine)
   local actual_view = session.current_view or "records"
-  if actual_view == view_name and view_name ~= "history" then
+  if actual_view == view_name and view_name ~= "history" and not (opts and opts.force) then
     local full_labels = {
       records = "Records", columns = "Columns", fk = "Foreign Keys",
       indexes = "Indexes", constraints = "Constraints", stats = "Stats", explain = "Explain",
@@ -2224,6 +2225,22 @@ function M.switch_view(bufnr, view_name)
       pcall(vim.api.nvim_win_set_cursor, cur_win, { 5, 0 })
     end
   end
+end
+
+--- Show freshly fetched records after a refresh. When a metadata view
+--- (columns, constraints, ...) is on screen, the rows become the records behind
+--- it and the view itself is reloaded; painting the records there would leave
+--- them under the metadata view's badge.
+function M.apply_records(bufnr, state)
+  local session = M._sessions[bufnr]
+  local cv = session and session.current_view
+  if cv and cv ~= "records" then
+    session.state = state
+    session._records_state = state
+    M.switch_view(bufnr, cv, { force = true })
+    return
+  end
+  M.render(bufnr, state)
 end
 
 -- ── in-place navigation: query pad sync ───────────────────────────────────
