@@ -456,6 +456,33 @@ test("sqlserver TLS defaults to validation and allows explicit local trust", fun
   has_arg(args, "-C", "explicit certificate bypass")
 end)
 
+test("sqlserver authentication URL option maps to --authentication-method", function()
+  local parsed = assert(sqlserver._parse_url(
+    "sqlserver://db.database.windows.net/app?authentication=ActiveDirectoryDefault"))
+  eq(parsed.authentication, "ActiveDirectoryDefault", "method parsed")
+  local args = sqlserver._sqlcmd_args(parsed, "SELECT 1")
+  has_arg(args, "--authentication-method", "method flag")
+  has_arg(args, "ActiveDirectoryDefault", "method value")
+  for _, arg in ipairs(args) do
+    assert(arg ~= "-E", "integrated auth must not be combined with an authentication method")
+  end
+  eq(next(sqlserver._sqlcmd_env(parsed)), nil, "no password channel without a user")
+
+  local sp = assert(sqlserver._parse_url(
+    "mssql://app-id:secret@db/app?authentication=ActiveDirectoryServicePrincipal"))
+  args = sqlserver._sqlcmd_args(sp, "SELECT 1")
+  has_arg(args, "-U", "user kept for methods that take one")
+  has_arg(args, "ActiveDirectoryServicePrincipal", "method value")
+  eq(sqlserver._sqlcmd_env(sp).SQLCMDPASSWORD, "secret", "secret stays in the environment")
+
+  local plain = assert(sqlserver._parse_url("sqlserver://db/app"))
+  has_arg(sqlserver._sqlcmd_args(plain, "SELECT 1"), "-E", "integrated auth stays the default")
+
+  local bad, err = sqlserver._parse_url("sqlserver://db/app?authentication=Default%20-Q")
+  eq(bad, nil, "non-name method rejected")
+  contains(err, "authentication method", "error names the option")
+end)
+
 test("sqlserver rejects unsafe or contradictory TLS URL values before spawning", function()
   local parsed, err = sqlserver._parse_url("sqlserver://sa:pw@db/app?encrypt=maybe")
   eq(parsed, nil, "invalid encryption rejected")
