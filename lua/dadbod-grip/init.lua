@@ -1906,6 +1906,9 @@ function M.setup(opts)
     discovery     = { opts.discovery, "boolean", true },
     sticky_header = { opts.sticky_header, "boolean", true },
     open_sidebar  = { opts.open_sidebar,  "boolean", true },
+    sqlserver_max_type_width = { opts.sqlserver_max_type_width, function(v)
+      return v == nil or (type(v) == "number" and v >= 0 and v <= 8000 and v % 1 == 0)
+    end, "integer from 0 to 8000, or nil" },
   })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
@@ -1918,6 +1921,7 @@ function M.setup(opts)
   if opts.discovery ~= nil then OPTS.discovery = opts.discovery end
   if opts.sticky_header ~= nil then OPTS.sticky_header = opts.sticky_header end
   OPTS.open_sidebar = opts.open_sidebar ~= false
+  OPTS.sqlserver_max_type_width = opts.sqlserver_max_type_width
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then
