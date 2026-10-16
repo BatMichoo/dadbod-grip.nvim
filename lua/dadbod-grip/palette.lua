@@ -60,7 +60,7 @@ end
 -- ── built-in action list ───────────────────────────────────────────────────
 -- Labels use a fixed 10-char category tag for scannable alignment:
 --   [nav]      [query]    [grid]     [filter]   [page]
---   [analysis] [export]   [fk]       [ddl]      [ai]
+--   [analysis] [export]   [fk]       [ddl]
 --
 -- Keys are looked up from keymaps.lua at open() time so user remaps are
 -- reflected in the palette preview and in the feedkeys firing.
@@ -82,12 +82,8 @@ local function _build_actions()
     act("[query]    Open query pad",         k("query_pad"),        "Open query editor (pre-filled with current SQL)",             { "grid", "sidebar" }),
     act("[query]    Execute SQL",            k("qpad_execute"),     "Run the full query buffer",                                   { "query" }),
     act("[query]    Save query",             k("qpad_save"),        "Save current buffer as a named query",                        { "query" }),
-    act("[query]    AI SQL generation",      k("qpad_ai"),          "Generate SQL from a plain-English description",               { "query" }),
     act("[query]    Jump to grid",           k("goto_grid"),        "Focus the grid window",                                       { "query" }),
     act("[query]    Format SQL",             k("qpad_format"),      "Reformat SQL (external tool cascade -> Lua fallback)",         { "query" }),
-
-    -- ── AI (grid) ──────────────────────────────────────────────────────────
-    act("[ai]       AI SQL generation",      k("ai"),               "Generate SQL from a plain-English description",               { "grid" }),
 
     -- ── Grid: editing ─────────────────────────────────────────────────────
     act("[grid]     Edit cell",              k("grid_edit"),        "Open inline cell editor",                                     { "grid" }),

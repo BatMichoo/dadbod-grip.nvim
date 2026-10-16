@@ -246,10 +246,6 @@ Investigation status: `they_got_us`. Finding: `they have the recipe`.
 `they_got_us` is a valid status value in this schema. The finding is four words.
 No further notes exist in the record.
 
-> **AI:** press `A` from the grid and describe a follow-up in plain English:
-> "show all youtube comments with knows_too_much true and an active investigation."
-> The AI has your current schema and will write the JOIN for you.
-
 ---
 
 ## 9.5 Confirming the threat sources are active

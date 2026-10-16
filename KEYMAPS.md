@@ -190,8 +190,6 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | `gq` | Load saved query |
 | `gh` | Query history browser |
 | `r` | Refresh (re-run query) |
-| `A` | AI SQL generation |
-| `gA` | AI row fill: stage 1 generated row (`:GripFill N` for more) |
 
 ## Query Pad (ft=sql, editable)
 
@@ -200,10 +198,6 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | `<C-p>` | Command palette (searchable action list) |
 | `<C-CR>` | Execute query |
 | `<S-CR>` | Execute and always open result in a new split (never reuses existing grid) |
-| (auto) | SQL completion fires as you type: tables, columns, aliases, federation |
-| `<C-Space>` | Manually trigger SQL completion |
-| `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
-| `gA` | AI SQL generation |
 | `gF` | Format SQL (external tool cascade: sql-formatter -> pg_format -> sqlfluff -> Lua fallback) |
 | `gn` | Open notebook file (.md/.sql) in query pad |
 | `?` | Show help |

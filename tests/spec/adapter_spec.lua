@@ -1895,50 +1895,6 @@ test("duckdb get_schema_batch: view columns survive the name-only view row", fun
   eq(#result["sup.sv"], 0, "no column source exists for views in attached non-DuckDB catalogs")
 end)
 
--- ── Completion: get_schema prefers batch over per-table ─────────────────────
--- When get_schema_batch returns data, list_tables + get_column_info must NOT be called.
-
-test("completion get_schema: uses batch when available, skips per-table", function()
-  local compl = require("dadbod-grip.completion")
-  local db_mod = require("dadbod-grip.db")
-
-  local batch_called = false
-  local list_called = false
-  local col_called = false
-
-  local orig_batch = db_mod.get_schema_batch
-  local orig_list = db_mod.list_tables
-  local orig_cols = db_mod.get_column_info
-
-  db_mod.get_schema_batch = function(url)
-    batch_called = true
-    return {
-      ["users"] = {
-        { column_name = "id", data_type = "integer", is_nullable = "NO" },
-      },
-    }
-  end
-  db_mod.list_tables = function(url)
-    list_called = true
-    return { { name = "users" } }, nil
-  end
-  db_mod.get_column_info = function(tn, url)
-    col_called = true
-    return {}, nil
-  end
-
-  compl.invalidate("postgresql://localhost/batch_pref_test")
-  compl.get_schema("postgresql://localhost/batch_pref_test")
-
-  db_mod.get_schema_batch = orig_batch
-  db_mod.list_tables = orig_list
-  db_mod.get_column_info = orig_cols
-
-  assert(batch_called, "get_schema_batch must be called")
-  assert(not list_called, "list_tables must NOT be called when batch succeeds")
-  assert(not col_called, "get_column_info must NOT be called when batch succeeds")
-end)
-
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nadapter_spec: %d passed, %d failed", pass, fail))

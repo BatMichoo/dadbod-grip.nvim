@@ -949,9 +949,6 @@ function M.switch(url, name, conn_type, opts)
   end
 
   M.set_health(url, "ok")
-  -- Invalidate completion cache so the new connection's schema is fetched fresh.
-  require("dadbod-grip.completion").invalidate(url)
-
   local label = name or url
 
   vim.schedule(function()
@@ -987,14 +984,6 @@ function M.switch(url, name, conn_type, opts)
     -- After the layout, not before it: fired first, this toast hung alone over
     -- an empty screen for however long the schema took to arrive.
     vim.notify("Grip: connected to " .. label, vim.log.levels.INFO)
-
-    -- Pre-warm completion schema cache in background (avoids freeze on first keypress)
-    vim.schedule(function()
-      pcall(function()
-        require("dadbod-grip.completion").warm_schema(url)
-      end)
-    end)
-
   end)
   return true
 end

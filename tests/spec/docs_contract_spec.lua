@@ -95,14 +95,10 @@ test("documented default keymap registry exactly matches code", function()
     documented[action] = key
   end
   eq(documented, keymaps.defaults, "default keymaps")
-  eq(documented.grid_fill, "gA", "grid gA is row fill")
-  eq(documented.qpad_ai, "gA", "query-pad gA is SQL generation")
 end)
 
 test("keymap documentation points to the catalog and runtime help stays complete", function()
   assert(readme:find("[`keymaps.json`](keymaps.json)", 1, true))
-  assert(readme:find("AI keys remain registered", 1, true))
-  assert(help:find("Pressing A or gA while AI is disabled shows an informational message", 1, true))
   assert(help:find("Press `gm` on any row", 1, true))
   assert(grid_help:find('"  gU        Set current column across all visible rows"', 1, true))
   assert(grid_help:find('"  gm        Open rows that reference the current row"', 1, true))
@@ -137,11 +133,8 @@ test("README uses the repository's canonical documentation URL", function()
 end)
 
 test("onboarding and process-privacy claims match current behavior", function()
-  assert(readme:find("`gA` generates SQL", 1, true))
-  assert(not readme:find("`A` in the query pad generates SQL", 1, true))
-
   for name, text in pairs({ README = readme, help = help }) do
-    assert(text:find("all database SQL and AI request content through stdin", 1, true),
+    assert(text:find("all database SQL through stdin", 1, true),
       name .. " must document the stdin boundary")
     assert(text:find("running as your user may still read those environment variables", 1, true),
       name .. " must document the same-user environment limit")
@@ -196,7 +189,6 @@ test("demo walkthrough uses cataloged keys and current data-source behavior", fu
     grid_fk_follow = "Press `%s` on any FK column",
     grid_fk_referencing = "or `%s` on a referenced row",
     grid_export_clip = "Press `%s`\n> to export",
-    ai = "press `%s` from the grid",
     editor_open_url = "press `%s`.",
     grid_preview_sql = "Press `%s` to inspect both",
     grid_undo = "press `%s` once",

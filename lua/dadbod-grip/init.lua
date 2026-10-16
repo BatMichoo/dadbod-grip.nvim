@@ -31,7 +31,6 @@ local OPTS = {
   limit       = 100,
   max_col_width = 40,
   timeout     = 10000,
-  completion  = true,
   connections_path = nil,
   picker      = "builtin",
   pinned_max  = nil,
@@ -1620,9 +1619,8 @@ function M.open_welcome()
     "",
     "  ── Query pad ───────────────────────────────────",
     "  q       open pad             <C-CR>  run SQL block",
-    "  gn      notebook picker      gA      AI generation",
-    "  gh      query history        gq      load saved",
-    "  <C-s>   save query",
+    "  gn      notebook picker      gh      query history",
+    "  gq      load saved           <C-s>   save query",
     "",
     "  ── Grid: edit ──────────────────────────────────",
     "  i/<CR>  edit cell            x     set null",
@@ -1635,7 +1633,7 @@ function M.open_welcome()
     "  ── Analysis ────────────────────────────────────",
     "  gR  column distributions     gS  column stats",
     "  gD  diff tables              gE  export clipboard",
-    "  gX  export to file           A   AI SQL (grid)",
+    "  gX  export to file",
     "",
     "  ── Files ───────────────────────────────────────",
     "  /path/to/file.csv   .parquet   .json   .xlsx",
@@ -1763,14 +1761,6 @@ function M.open_welcome()
     require("dadbod-grip.er_diagram").toggle(conn)
   end, "ER diagram")
   wmap("?",     function() view.show_help() end, "Full keymap help")
-  wmap("A",     function()
-    local ai = require("dadbod-grip.ai")
-    if not ai.is_enabled() then
-      vim.notify("AI is disabled. Enable it in setup({ ai = { ... } })", vim.log.levels.INFO)
-      return
-    end
-    ai.ask(cur_conn())
-  end, "AI SQL assistant")
 
   -- 1-9: surface navigation from welcome screen
   wmap("1", function()
@@ -1883,16 +1873,10 @@ end
 
 -- ── setup ─────────────────────────────────────────────────────────────────
 
----@class DadbodGripAIOpts
----@field provider? string   "anthropic"|"openai"|"gemini"|"ollama"|nil (auto-detect)
----@field model? string      Override the default model name
----@field ollama_url? string Ollama base URL (default: http://localhost:11434)
-
 ---@class DadbodGripOpts
 ---@field limit? integer         Rows per page (default: 100)
 ---@field max_col_width? integer Max display width per column (default: 40)
 ---@field timeout? integer       Query timeout in ms (default: 10000)
----@field ai? DadbodGripAIOpts   AI SQL generation config
 ---@field keymaps? table         Key overrides: { action_name = "key" } or { action_name = false }
 ---@field pinned_max? integer    Max number of pinned results allowed (nil = unlimited)
 ---@field border? string|table   Float window border style (default: "rounded")
@@ -1909,12 +1893,10 @@ function M.setup(opts)
     limit         = { opts.limit,         "number",  true },
     max_col_width = { opts.max_col_width,  "number",  true },
     timeout       = { opts.timeout,        "number",  true },
-    completion       = { opts.completion,      "boolean", true },
     connections_path = { opts.connections_path, "string",  true },
     picker           = { opts.picker, function(v)
       return v == nil or v == "builtin" or v == "telescope" or v == "snacks"
     end, '"builtin", "telescope", or "snacks"' },
-    ai            = { opts.ai,             function(v) return v == nil or type(v) == "table" or v == false end, "table, false, or nil" },
     keymaps       = { opts.keymaps,        "table",   true },
     pinned_max    = { opts.pinned_max,     "number",  true },
     border        = { opts.border, function(v) return v == nil or type(v) == "string" or type(v) == "table" end, "string, table, or nil" },
@@ -1928,7 +1910,6 @@ function M.setup(opts)
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
-  if opts.completion ~= nil then OPTS.completion = opts.completion end
   OPTS.connections_path = opts.connections_path or nil
   OPTS.picker = opts.picker or "builtin"
   if opts.pinned_max ~= nil then OPTS.pinned_max = opts.pinned_max end
@@ -1941,11 +1922,6 @@ function M.setup(opts)
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then
     M._keymaps = opts.keymaps
-  end
-
-  -- AI configuration (optional). Accepts a config table OR false to disable.
-  if opts.ai ~= nil then
-    require("dadbod-grip.ai").setup(opts.ai)
   end
 
   -- Register :Grip command
@@ -2167,33 +2143,6 @@ function M.setup(opts)
     desc  = "Profile table columns with sparkline distributions",
   })
 
-  -- Register :GripAsk command
-  vim.api.nvim_create_user_command("GripAsk", function(cmd_opts)
-    local question = vim.trim(cmd_opts.args or "")
-    local conn = db.get_url()
-    if not conn then
-      vim.notify("GripAsk: no database connection", vim.log.levels.WARN)
-      return
-    end
-    local ai = require("dadbod-grip.ai")
-    if question ~= "" then
-      vim.notify("Generating SQL...", vim.log.levels.INFO)
-      ai.generate_sql(question, conn, function(result_sql, err)
-        if err then
-          vim.notify("GripAsk: " .. err, vim.log.levels.ERROR)
-          return
-        end
-        local query_pad = require("dadbod-grip.query_pad")
-        query_pad.open(conn, { initial_sql = result_sql })
-      end)
-    else
-      ai.ask(conn)
-    end
-  end, {
-    nargs = "?",
-    desc  = "Generate SQL from natural language",
-  })
-
   -- Register :GripDiff command
   vim.api.nvim_create_user_command("GripDiff", function(cmd_opts)
     local args = vim.split(vim.trim(cmd_opts.args or ""), "%s+")
@@ -2377,12 +2326,7 @@ function M.setup(opts)
       return
     end
     connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
-    require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
-    -- Pre-warm completion cache after manual attach (M.attach no longer does this).
-    vim.schedule(function()
-      pcall(function() require("dadbod-grip.completion").warm_schema(url) end)
-    end)
     vim.notify(string.format("Attached '%s' as %s", dsn, alias), vim.log.levels.INFO)
   end, {
     nargs = "*",
@@ -2419,7 +2363,6 @@ function M.setup(opts)
 
     duckdb_adapter.detach(conn_url, alias)
     connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
-    require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     vim.notify(string.format("Detached '%s'", alias), vim.log.levels.INFO)
   end, {
@@ -2536,19 +2479,6 @@ function M.setup(opts)
     nargs = "*",
     desc = "Preview and stage CSV, TSV, or JSON rows from clipboard or !command",
   })
-
-  -- :GripFill [N]: stage N AI-generated realistic rows (default 1, max 50)
-  vim.api.nvim_create_user_command("GripFill", function(cmd_opts)
-    -- do_fill_rows works on the session's connection, so guard on that one and
-    -- not on the ambient one, which can be a different connection entirely
-    -- after a :GripConnect. With no session there is nothing to fill and no
-    -- URL to check; nil falls back to the ambient connection so the refusal
-    -- still names the mode rather than the missing session.
-    local fill_session = view._sessions[vim.api.nvim_get_current_buf()]
-    if deny_if_readonly("GripFill", fill_session and fill_session.url) then return end
-    local n = math.max(1, math.min(50, tonumber(cmd_opts.args) or 1))
-    M.do_fill_rows(n)
-  end, { nargs = "?", desc = "Stage N AI-generated rows for current table (default 1, max 50)" })
 end
 
 -- Exposed for testing
@@ -2633,87 +2563,6 @@ function M.do_import(source)
   view.apply_edit(bufnr, state)
   vim.notify(string.format("GripImport: staged %d rows from %s; press a to apply",
     #parsed.rows, source_name), vim.log.levels.INFO)
-end
-
---- Stage N AI-generated realistic rows into the current grip grid.
---- Validates session, calls ai.generate_rows(), stages each row via
---- data.insert_row_with_values(), then re-renders with view.apply_edit().
----@param n number  number of rows to stage (max 50, enforced by caller)
-function M.do_fill_rows(n)
-  local bufnr = vim.api.nvim_get_current_buf()
-  local session = view._sessions[bufnr]
-  if not session then
-    vim.notify("GripFill: no grip session on this buffer", vim.log.levels.WARN)
-    return
-  end
-  if not session.state.table_name then
-    vim.notify("GripFill: requires an editable table (not a raw query result)", vim.log.levels.WARN)
-    return
-  end
-
-  local ai_mod = require("dadbod-grip.ai")
-  local db_url  = session.url
-  local tbl     = session.state.table_name
-
-  -- Build single-table DDL so the AI knows exactly what to fill.
-  local db_mod = require("dadbod-grip.db")
-  -- Checked here too, not only in :GripFill: the AI keymap calls this
-  -- directly, and the adapter check below would refuse a read-only *connection*
-  -- with the wrong reason when its adapter is perfectly writable.
-  if deny_if_readonly("GripFill", db_url) then return end
-  if db_mod.is_readonly(db_url) then
-    vim.notify("GripFill: this adapter is read-only", vim.log.levels.WARN)
-    return
-  end
-  local cols  = db_mod.get_column_info(tbl, db_url)
-  local pks   = db_mod.get_primary_keys(tbl, db_url)
-  local ok_fk, fks = pcall(db_mod.get_foreign_keys, tbl, db_url)
-  if not ok_fk then fks = {} end
-  local ddl     = ai_mod._format_ddl_line(tbl, cols or {}, pks or {}, fks)
-
-  -- Detect adapter for value-format hints. SQLite stays the fallback for
-  -- URLs no adapter claims (its value syntax is the most permissive) -- which
-  -- is why a "${VAR}" template is resolved first: the generated rows are
-  -- executed, so falling back to the wrong dialect is not a cosmetic miss.
-  local adapter = require("dadbod-grip.adapters").display_name(db_mod.resolved_url(db_url)) or "SQLite"
-
-  ui.blocking("Generating " .. n .. " row(s)...", function()
-    local done = false
-    local gen_rows, gen_err
-
-    ai_mod.generate_rows(n, ddl, adapter, tbl, db_url, function(rows, err)
-      gen_rows, gen_err = rows, err
-      done = true
-    end)
-
-    vim.wait(30000, function() return done end, 50)
-
-    if gen_err then
-      vim.notify("GripFill: " .. gen_err, vim.log.levels.ERROR)
-      return
-    end
-    if not gen_rows or #gen_rows == 0 then
-      vim.notify("GripFill: AI returned no rows", vim.log.levels.WARN)
-      return
-    end
-
-    local st = session.state
-    local after_idx = #st.rows
-    for _, row_values in ipairs(gen_rows) do
-      local values = {}
-      for col, val in pairs(row_values) do
-        if val == nil or val == vim.NIL then
-          values[col] = nil
-        else
-          values[col] = tostring(val)
-        end
-      end
-      st = data.insert_row_with_values(st, after_idx, values)
-      after_idx = after_idx + 1
-    end
-    view.apply_edit(bufnr, st)
-    vim.notify("GripFill: staged " .. #gen_rows .. " row(s); press a to apply", vim.log.levels.INFO)
-  end)
 end
 
 return M

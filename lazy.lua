@@ -21,7 +21,6 @@ return {
       "GripHistory",
       "GripProfile",
       "GripExplain",
-      "GripAsk",
       "GripDiff",
       "GripCreate",
       "GripDrop",
@@ -33,7 +32,6 @@ return {
       "GripDetach",
       "GripOpen",
       "GripToggle",
-      "GripFill",
     },
   },
 }

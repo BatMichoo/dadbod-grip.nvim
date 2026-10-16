@@ -65,7 +65,6 @@ local function with_real_file(fn)
   local orig_open_welcome = grip.open_welcome
   local orig_schema = package.loaded["dadbod-grip.schema"]
   local orig_query_pad = package.loaded["dadbod-grip.query_pad"]
-  local orig_completion = package.loaded["dadbod-grip.completion"]
   local orig_duckdb = package.loaded["dadbod-grip.adapters.duckdb"]
   local orig_connections = package.loaded["dadbod-grip.connections"]
 
@@ -88,7 +87,6 @@ local function with_real_file(fn)
     prefetch = function() return {} end,
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
-  package.loaded["dadbod-grip.completion"] = { invalidate = function() end, warm_schema = function() end }
   package.loaded["dadbod-grip.adapters.duckdb"] = { load_attachments = function() end }
   package.loaded["dadbod-grip.connections"] = nil
   connections = require("dadbod-grip.connections")
@@ -107,7 +105,6 @@ local function with_real_file(fn)
   grip.open_welcome = orig_open_welcome
   package.loaded["dadbod-grip.schema"] = orig_schema
   package.loaded["dadbod-grip.query_pad"] = orig_query_pad
-  package.loaded["dadbod-grip.completion"] = orig_completion
   package.loaded["dadbod-grip.adapters.duckdb"] = orig_duckdb
   package.loaded["dadbod-grip.connections"] = orig_connections
   connections = orig_connections

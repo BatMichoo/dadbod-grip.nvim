@@ -26,12 +26,6 @@ local remaps = {
   grid_col_left = ",",
   grid_col_right = ";",
   table_picker_go = "zp",
-  qpad_complete = "<F14>",
-  qpad_complete_next = "<F15>",
-  qpad_complete_prev = "<F16>",
-  qpad_complete_down = "<F17>",
-  qpad_complete_up = "<F18>",
-  qpad_complete_accept = "<F19>",
   sidebar_close = "<F20>",
   editor_save = "<F21>",
   editor_save_alt = "<F22>",
@@ -49,8 +43,6 @@ if scenario == "remap" then
 elseif scenario == "disabled" then
   opts.keymaps = {}
   for action in pairs(target_actions) do opts.keymaps[action] = false end
-  opts.completion = false
-  opts.ai = false
 end
 grip.setup(opts)
 
@@ -84,9 +76,8 @@ end
 local function expected_for(surface, mode)
   local expected = {}
   for _, record in ipairs(keymaps.catalog) do
-    local enabled = not record.requires or grip.get_opts()[record.requires]
     local key = keymaps.get(record.action)
-    if enabled and key and includes(record.surfaces, surface) and includes(record.modes, mode) then
+    if key and includes(record.surfaces, surface) and includes(record.modes, mode) then
       local lhs = normalize(key)
       assert(not expected[lhs], string.format("duplicate expected %s %s mapping: %s and %s",
         surface, mode, expected[lhs], record.action))
@@ -197,13 +188,6 @@ if scenario == "remap" then
     "remapped cell-editor cancel callback missing")
   cancel()
   assert(editor_result == nil, "remapped cell-editor cancel did not cancel")
-end
-
-if scenario == "disabled" then
-  local grid_normal = expected_for("grid", "n")
-  local query_normal = expected_for("query_pad", "n")
-  assert(grid_normal[normalize("A")] == "ai", "ai=false removed the grid AI key")
-  assert(query_normal[normalize("gA")] == "qpad_ai", "ai=false removed the query-pad AI key")
 end
 
 vim.cmd("qall!")

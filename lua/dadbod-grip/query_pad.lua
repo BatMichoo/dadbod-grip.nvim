@@ -1,6 +1,6 @@
 -- query_pad.lua: SQL scratch buffer that pipes results into grip grids.
--- ft=sql enables vim-dadbod-completion if installed.
--- b:db = connection URL for completion context.
+-- ft=sql and b:db (the connection URL) let external SQL completion plugins,
+-- such as vim-dadbod-completion, attach to the pad.
 
 local M = {}
 
@@ -12,90 +12,19 @@ local _pad_bufnr = nil
 local _last_synced = nil
 
 --- Return true when `lines` contains real SQL content.
---- Strips the hint comment (-- C-CR:...) and AI separator (-- AI generated:)
---- before deciding. Blank/whitespace-only remaining lines = no real content.
---- This is the single canonical check used by sync_query, M.open, and append_sql.
+--- Strips the hint comment (-- C-CR:...) before deciding.
+--- Blank/whitespace-only remaining lines = no real content.
+--- This is the single canonical check used by sync_query and M.open.
 local function _has_real_content(lines)
   local real = {}
   for _, line in ipairs(lines) do
-    if not line:match("^%-%- C%-CR:") and not line:match("^%-%- AI generated:") then
+    if not line:match("^%-%- C%-CR:") then
       table.insert(real, line)
     end
   end
   return table.concat(real, "\n"):match("^%s*(.-)%s*$") ~= ""
 end
 M._has_real_content = _has_real_content  -- exported for unit tests
-
---- Register completion keymaps for the query pad buffer.
---- Called once at buffer creation and re-called on BufEnter (via vim.schedule) to
---- override buffer-local keymaps that completion plugins (blink.cmp etc.) register
---- on every BufEnter. Last registration wins; ours must be last.
-local function setup_completion_keymaps(bufnr)
-  local km = require("dadbod-grip.keymaps")
-  local function fk(s)
-    return vim.api.nvim_replace_termcodes(s, true, true, true)
-  end
-
-  -- C-Space: alias for <C-x><C-o>. Vim passes the actual typed word as base,
-  -- so context parsing (table/column/keyword) works correctly.
-  km.bind("query_pad", bufnr, "qpad_complete", "i", function()
-    vim.api.nvim_feedkeys(fk("<C-x><C-o>"), "n", false)
-  end, { desc = "Grip: trigger SQL completion" })
-
-  -- Tab: navigate cmp popup → navigate native popup → trigger omnifunc → literal tab.
-  km.bind("query_pad", bufnr, "qpad_complete_next", "i", function()
-    local ok, cmp = pcall(require, "cmp")
-    if ok and cmp.visible() then
-      cmp.select_next_item({ behavior = cmp.SelectBehavior.Select })
-    elseif vim.fn.pumvisible() == 1 then
-      vim.api.nvim_feedkeys(fk("<C-n>"), "n", false)
-    else
-      local line = vim.api.nvim_get_current_line()
-      local col  = vim.api.nvim_win_get_cursor(0)[2]
-      if line:sub(1, col):match("[%a%d_%.%*]$") then
-        vim.api.nvim_feedkeys(fk("<C-x><C-o>"), "n", false)
-      else
-        vim.api.nvim_feedkeys(fk("<Tab>"), "n", false)
-      end
-    end
-  end, { desc = "Grip: trigger or navigate completion" })
-
-  -- Down/Up/S-Tab: navigate popup (cmp or native), fall through otherwise.
-  local function nav(next_key, prev_key, is_next)
-    return function()
-      local ok, cmp = pcall(require, "cmp")
-      if ok and cmp.visible() then
-        if is_next then
-          cmp.select_next_item({ behavior = cmp.SelectBehavior.Select })
-        else
-          cmp.select_prev_item({ behavior = cmp.SelectBehavior.Select })
-        end
-      elseif vim.fn.pumvisible() == 1 then
-        vim.api.nvim_feedkeys(fk(is_next and "<C-n>" or "<C-p>"), "n", false)
-      else
-        vim.api.nvim_feedkeys(fk(is_next and next_key or prev_key), "n", false)
-      end
-    end
-  end
-  km.bind("query_pad", bufnr, "qpad_complete_down", "i", nav("<Down>", "<Up>", true),
-    { desc = "Grip: next completion or down" })
-  km.bind("query_pad", bufnr, "qpad_complete_up", "i", nav("<Down>", "<Up>", false),
-    { desc = "Grip: prev completion or up" })
-  km.bind("query_pad", bufnr, "qpad_complete_prev", "i", nav("<S-Tab>", "<S-Tab>", false),
-    { desc = "Grip: prev completion or shift-tab" })
-
-  -- CR: confirm selected item; otherwise normal newline.
-  km.bind("query_pad", bufnr, "qpad_complete_accept", "i", function()
-    local ok, cmp = pcall(require, "cmp")
-    if ok and cmp.visible() and cmp.get_selected_entry() then
-      cmp.confirm({ select = false })
-    elseif vim.fn.pumvisible() == 1 then
-      vim.api.nvim_feedkeys(fk("<C-y>"), "n", false)
-    else
-      vim.api.nvim_feedkeys(fk("<CR>"), "n", false)
-    end
-  end, { desc = "Grip: confirm completion or newline" })
-end
 
 --- Get or create the query pad buffer.
 local function ensure_buf(url)
@@ -112,32 +41,9 @@ local function ensure_buf(url)
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url
-  -- SQL completion: gated on config.completion (default true).
-  -- When true, grip owns the popup: omnifunc, TextChangedI auto-trigger,
-  -- nvim-cmp/blink disabled per-buffer. When false, user brings their own
-  -- engine and wires grip as a source (blink provider or cmp source).
-  local grip_opts = require("dadbod-grip").get_opts()
-  if grip_opts.completion then
-    vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
-    local completion = require("dadbod-grip.completion")
-    completion.setup_auto_complete(_pad_bufnr, function()
-      return vim.b[_pad_bufnr].db or vim.g.db
-    end)
-    completion.register_cmp_source()
-  end
-  -- Pre-warm schema cache regardless of completion mode (blink/cmp sources need it too).
-  local warm_bufnr = _pad_bufnr
-  vim.schedule(function()
-    -- The pad is bufhidden=wipe: it can be gone by the time this runs, and
-    -- indexing vim.b on a dead buffer raises "Invalid buffer id".
-    if not vim.api.nvim_buf_is_valid(warm_bufnr) then return end
-    local u = vim.b[warm_bufnr].db or vim.g.db
-    if u and u ~= "" then pcall(require("dadbod-grip.completion").get_schema, u) end
-  end)
-
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- C-CR:run block or buffer  gn:notebooks  gA:ai  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
+    "-- C-CR:run block or buffer  gn:notebooks  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
     "",
   })
   -- Mark buffer as not modified after creation
@@ -152,23 +58,6 @@ local function ensure_buf(url)
       saved.save_prompt(_pad_bufnr)
     end,
   })
-
-  -- BufEnter: re-register completion keymaps after completion plugins (blink.cmp etc.)
-  -- have had their BufEnter handlers run. Only needed when grip owns the popup.
-  if grip_opts.completion then
-    local bufnr_ref = _pad_bufnr
-    vim.api.nvim_create_autocmd("BufEnter", {
-      group  = _ag,
-      buffer = _pad_bufnr,
-      callback = function()
-        vim.schedule(function()
-          if vim.api.nvim_buf_is_valid(bufnr_ref) then
-            setup_completion_keymaps(bufnr_ref)
-          end
-        end)
-      end,
-    })
-  end
 
   return _pad_bufnr
 end
@@ -259,13 +148,12 @@ local function _block_under_cursor(bufnr)
 end
 M._block_under_cursor = _block_under_cursor  -- exported for unit tests
 
---- A line that separates one runnable statement from the next: blank lines, the
---- hint comment, and the AI separator. sync_query stacks queries separated by a
+--- A line that separates one runnable statement from the next: blank lines and
+--- the hint comment. sync_query stacks queries separated by a
 --- blank line, so a "statement" is a maximal run of non-separator lines.
 local function _is_stmt_boundary(l)
   return l:match("^%s*$") ~= nil
     or l:match("^%-%- C%-CR:") ~= nil
-    or l:match("^%-%- AI generated:") ~= nil
 end
 
 --- Return the single SQL statement to run for the cursor position. A ```sql fence
@@ -396,10 +284,6 @@ local function setup_keymaps(bufnr, url)
     run_sql(cur_url(), table.concat(lines, "\n"), true)
   end, { desc = "Grip: run selection in new split" })
 
-  if require("dadbod-grip").get_opts().completion then
-    setup_completion_keymaps(bufnr)
-  end
-
   -- Visual qpad_execute: run selection (line-wise: runs all selected lines)
   kmap("qpad_execute", "x", function()
     -- feedkeys Esc to exit visual mode and set '< '> marks, then run
@@ -422,16 +306,6 @@ local function setup_keymaps(bufnr, url)
   kmap("qpad_close", "n", function()
     require("dadbod-grip").open_welcome()
   end, { nowait = true, desc = "Grip: welcome screen" })
-
-  -- qpad_ai: AI SQL generation (keep g-prefix to preserve A=append-at-EOL)
-  kmap("qpad_ai", "n", function()
-    local ai = require("dadbod-grip.ai")
-    if not ai.is_enabled() then
-      vim.notify("AI is disabled. Enable it in setup({ ai = { ... } })", vim.log.levels.INFO)
-      return
-    end
-    ai.ask(cur_url())
-  end, { desc = "Grip: AI SQL generation" })
 
   -- qpad_format: format SQL in buffer (external tool cascade -> Lua fallback)
   kmap("qpad_format", "n", function()
@@ -687,33 +561,6 @@ function M.open(url, opts)
   end
 end
 
---- Append or replace SQL text in the query pad buffer.
---- Replaces hint/empty content; appends with separator when content exists.
---- opts.replace = true: replace entire buffer (used when AI modifies existing query).
-function M.append_sql(sql_text, opts)
-  opts = opts or {}
-  if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
-  local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
-
-  local sql_lines = vim.split(sql_text, "\n")
-  vim.bo[_pad_bufnr].modifiable = true
-  if not _has_real_content(lines) or opts.replace then
-    vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
-  else
-    local append = { "", "-- AI generated:" }
-    vim.list_extend(append, sql_lines)
-    vim.api.nvim_buf_set_lines(_pad_bufnr, -1, -1, false, append)
-  end
-  _last_synced = nil  -- AI content is user-owned; the next sync must not reclaim it
-  vim.bo[_pad_bufnr].modified = false
-  -- Move cursor to the new SQL
-  local total = vim.api.nvim_buf_line_count(_pad_bufnr)
-  local win = vim.fn.bufwinid(_pad_bufnr)
-  if win ~= -1 then
-    pcall(vim.api.nvim_win_set_cursor, win, { total, 0 })
-  end
-end
-
 --- Return the [start, end] 1-based line range of the pad's trailing paragraph
 --- (last run of non-blank lines), or nil when there is none.
 local function _trailing_block_range(lines)
@@ -793,10 +640,10 @@ function M.get_content()
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return nil end
   local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
   if #lines == 0 then return nil end
-  -- Filter out hint comment and AI separator lines, keep real SQL
+  -- Filter out the hint comment line, keep real SQL
   local real = {}
   for _, line in ipairs(lines) do
-    if not line:match("^%-%- C%-CR:") and not line:match("^%-%- AI generated:") then
+    if not line:match("^%-%- C%-CR:") then
       table.insert(real, line)
     end
   end

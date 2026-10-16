@@ -28,10 +28,9 @@ CONTENTS                                                    *grip-contents*
   19. Data Diff ................ |grip-diff|
   20. Table Profiling .......... |grip-profiling|
   21. Query Doctor ............. |grip-explain-full|
-  22. AI SQL Generation ........ |grip-ai|
-  23. Cross-DB Federation ...... |grip-federation|
-  24. S3 and Remote Files ....... |grip-s3-files|
-  25. Health Check .............. |grip-health|
+  22. Cross-DB Federation ...... |grip-federation|
+  23. S3 and Remote Files ....... |grip-s3-files|
+  24. Health Check .............. |grip-health|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -99,8 +98,8 @@ Local checkout for development/testing: >lua
 Keeping the GitHub repo string as the first field preserves lazy.nvim's plugin
 identity while loading files from your local checkout.
 
-Grip's standalone SQL completion is built in. No additional plugins are
-required; blink.cmp and nvim-cmp are optional alternative frontends.
+Grip has no built-in SQL completion. The query pad sets filetype=sql and
+b:db, so completion plugins such as vim-dadbod-completion can attach to it.
 To verify your setup after installation: >
   :checkhealth dadbod-grip
 <
@@ -119,7 +118,6 @@ Override if needed: >lua
     limit            = 100,
     max_col_width    = 40,
     timeout          = 10000,
-    completion       = true,
     connections_path = nil,
     picker           = "builtin",
     pinned_max       = nil,
@@ -128,10 +126,6 @@ Override if needed: >lua
     open_sidebar     = true,
   })
 <
-When `completion` is false, grip's built-in TextChangedI popup is disabled.
-Use blink.cmp or nvim-cmp as the completion engine instead. See |grip-install|
-for source configuration examples.
-
 When `connections_path` is set, grip reads and writes connections to that single
 file only (skips the project-local + global merge). Useful for a centralized
 connections file shared across projects.
@@ -181,23 +175,6 @@ the whole grid by one row every time scrolling crosses that threshold.
 A winbar costs one screen line per grid window; set `sticky_header = false`
 to reclaim it for good (the badges then render as before).
 
-AI SQL generation (optional): >lua
-  require("dadbod-grip").setup({
-    ai = {
-      provider = nil,       -- nil = auto-detect, or "anthropic"/"openai"/"gemini"/"ollama"
-      model = nil,          -- nil = provider default
-      api_key = nil,        -- nil = env var, "env:VAR", "cmd:op read ...", or direct string
-      base_url = nil,       -- override for ollama or proxy
-    }
-  })
-<
-Provider auto-detection priority: ANTHROPIC_API_KEY > OPENAI_API_KEY >
-GEMINI_API_KEY > ollama (local). Explicit provider setting always wins.
-
-To disable AI entirely (skips schema pre-warm, info message on A/gA): >lua
-  require("dadbod-grip").setup({ ai = false })
-<
-
 ------------------------------------------------------------------------------
                                                              *grip-keymaps-cfg*
 KEYMAP CONFIGURATION ~
@@ -229,9 +206,6 @@ Action names (stable API) with their defaults:
 
   Shared: grid + sidebar ~
   query_pad        = "q"       open query pad
-
-  Grid only ~
-  ai               = "A"       AI SQL generation
 
   Shared: query pad + sidebar ~
   goto_grid        = "gw"      jump to grid window
@@ -309,19 +283,13 @@ Action names (stable API) with their defaults:
 
   Grid: workflow ~
   grid_watch       = "gW"      grid_write_mode  = "g!"
-  grid_open_edit   = "gO"      grid_fill        = "gA"  (AI row fill; :GripFill N)
-  grid_pin         = "gL"      grid_results     = "gJ"
+  grid_open_edit   = "gO"      grid_pin         = "gL"
+  grid_results     = "gJ"
 
   Query pad ~
   qpad_execute     = "<C-CR>"  qpad_execute_new = "<S-CR>"
-  qpad_save        = "<C-s>"   qpad_ai          = "gA"
-  qpad_format      = "gF"      qpad_close       = "q"
-
-  Query pad completion (when completion=true) ~
-  qpad_complete       = "<C-Space>"
-  qpad_complete_next  = "<Tab>"    qpad_complete_prev = "<S-Tab>"
-  qpad_complete_down  = "<Down>"   qpad_complete_up   = "<Up>"
-  qpad_complete_accept= "<CR>"
+  qpad_save        = "<C-s>"   qpad_format      = "gF"
+  qpad_close       = "q"
 
   Schema sidebar ~
   sidebar_open     = "<CR>"    sidebar_open_spl = "<S-CR>"
@@ -417,16 +385,6 @@ All commands are global and available after the plugin loads.
   sparkline distributions. Shows completeness, cardinality, min/max, and
   top values. Adapts to narrow terminals with a stacked layout.
 
-                                                                 *:GripAsk*
-:GripAsk [question]
-  Generate SQL from a natural language question using AI. Schema context
-  is auto-assembled from database metadata. Result appears in the query
-  pad for review before execution.
-
-  Providers: Anthropic, OpenAI, Gemini, Ollama (local).
-  Auto-detects from env vars: ANTHROPIC_API_KEY > OPENAI_API_KEY >
-  GEMINI_API_KEY > ollama fallback. Override with setup({ai={...}}).
-
                                                               *:GripHistory*
 :GripHistory
   Browse query history. Every query executed via :Grip, the query pad,
@@ -500,20 +458,6 @@ All commands are global and available after the plugin loads.
   For s3:// prefixes (no file extension), opens the query pad pre-filled
   with a glob() query. For specific files, opens an editable grid directly.
   Requires DuckDB as the active connection for file and S3 access.
-
-                                                               *:GripFill*
-:GripFill [N]
-  Stage N AI-generated realistic rows into the current editable table grid
-  (default 1, max 50). The AI receives the table schema as context and
-  returns a JSON array of row objects. Each row is staged as a pending
-  INSERT; press a to apply. Also available as gA in the grid (stages 1
-  row). Requires an AI provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY,
-  GEMINI_API_KEY) or a local Ollama instance.
-
-  Example:
-    :GripFill        stage 1 row
-    :GripFill 5      stage 5 rows
-    :GripFill 50     maximum
 
                                                              *:GripImport*
 :GripImport [!command]
@@ -718,8 +662,6 @@ SCHEMA AND WORKFLOW ~
   gw              Jump to grid window
   q               Focus query pad (pre-fills if empty; appends if pad has content)
   gh              Query history browser
-  A               AI SQL generation (natural language)
-  gA              AI row fill: stage 1 generated row (:GripFill N for more)
 
 VISUAL MODE ~
                                                          *grip-visual-mode*
@@ -966,7 +908,7 @@ markers for primary keys and foreign keys.
 11. QUERY PAD                                             *grip-query-pad*
 
 Open with `:GripQuery` or `q` from the grid or schema sidebar. Creates a
-persistent scratch SQL buffer with filetype=sql and built-in completion.
+persistent scratch SQL buffer with filetype=sql.
 
 Content protection: pressing `q` or `2` focuses the pad without replacing
 anything. Clicking a table in the sidebar or picker appends the new query
@@ -974,27 +916,19 @@ below existing SQL with a blank separator. The pad is only pre-filled when
 it is empty (or contains only the hint comment). Your work is never lost.
 
 `<C-CR>` in visual mode runs only the selected lines. In normal or insert
-mode it runs the blank-line-delimited SQL block under the cursor. `gA` reads
-existing pad content and modifies it rather than generating from scratch.
+mode it runs the blank-line-delimited SQL block under the cursor.
 
-SQL completion is built in: table names, column names, aliases, and SQL
-keywords complete automatically as you type. In DuckDB federated sessions,
-columns from all attached databases appear with schema-qualified names
-(e.g. `pg.users.email`). The nvim-cmp source name is `dadbod_grip`.
-Works with nvim-cmp, blink.cmp, or standalone via `<C-Space>`.
+Grip provides no SQL completion. The pad sets `b:db` to the connection URL,
+so an external completion plugin such as vim-dadbod-completion can supply
+table and column names.
 
 Query pad keymaps:
   <C-CR>          Execute the SQL block under the cursor (normal/insert)
   <C-CR>          Execute visual selection into a grip grid (visual mode)
   <S-CR>      Execute and always open result in a new split (never reuses
                   an existing grid, even an unpinned one)
-  <C-Space>       Trigger SQL completion manually
-  <Tab>/<S-Tab>   Trigger or move through completion choices
-  <Down>/<Up>     Move through completion choices, or move normally
-  <CR>            Accept completion, or insert a newline
   <C-s>           Save query with :GripSave
   gq              Load saved query (picker with SQL preview)
-  gA              AI SQL generation (natural language)
   gF              Format SQL (external tool cascade -> Lua fallback)
   go / gT / gt    Table picker
   gh              Query history browser (with SQL preview)
@@ -1165,10 +1099,8 @@ expanded url. Passwords also reach psql, mysql, and sqlcmd through the process
 environment rather than argv, so they are not visible in another user's `ps`.
 Processes running as your user may still read those environment variables.
 
-Grip sends all database SQL and AI request content through stdin. Statements,
-prompts, schema context, existing SQL, and JSON request bodies are absent from
-argv. AI URLs and headers also travel through `curl --config -`, and API-key
-lookup commands run through shell stdin. DuckDB attachment declarations use
+Grip sends all database SQL through stdin. Statements and mutation values are
+absent from argv. DuckDB attachment declarations use
 the same stdin boundary. Credentialed PostgreSQL and MySQL attachments use
 invocation-scoped temporary DuckDB secrets and attach by secret name. Grip
 never creates persistent DuckDB secrets.
@@ -1189,7 +1121,7 @@ With `"mode": "ro"` grip connects using the client's own read-only switch:
   sqlserver    already read-only; `mode` does not apply
 
 Grid editing is disabled, and the DDL entry points (|:GripCreate|,
-|:GripDrop|, |:GripRename|, |:GripFill|, the sidebar's create/drop, and the
+|:GripDrop|, |:GripRename|, the sidebar's create/drop, and the
 column operations) decline up front instead of prompting and then failing at
 the server. The winbar shows `RO` while connected read-only.
 
@@ -1477,37 +1409,7 @@ Works across all five adapters:
   - SQL Server: SHOWPLAN_TEXT operator tree, no cost estimates
 
 ==============================================================================
-22. AI SQL GENERATION                                             *grip-ai*
-
-Generate SQL from natural language with :GripAsk, `A` from a grid, or `gA`
-from the query pad. In a grid, `gA` is intentionally different: it stages
-one AI-generated row, the same as :GripFill 1.
-
-  :GripAsk show me the top 5 users by order count
-
-Schema context is auto-assembled from database metadata (table names,
-column names, types, primary keys, foreign keys). The generated SQL
-appears in the query pad for review before execution.
-
-Supported providers:
-  - Anthropic (Claude) via ANTHROPIC_API_KEY
-  - OpenAI (GPT) via OPENAI_API_KEY
-  - Google Gemini via GEMINI_API_KEY
-  - Ollama (local) as automatic fallback
-
-Auto-detection priority: Anthropic > OpenAI > Gemini > Ollama.
-Override with setup({ai={provider="openai"}}).
-
-API key resolution: env var name, "env:CUSTOM_VAR", "cmd:op read ...",
-or a direct string. See |grip-config| for the full ai config block.
-
-To disable AI entirely (skips schema pre-warm on connection open): >lua
-  require("dadbod-grip").setup({ ai = false })
-<
-Pressing A or gA while AI is disabled shows an informational message.
-
-==============================================================================
-23. CROSS-DB FEDERATION                                    *grip-federation*
+22. CROSS-DB FEDERATION                                    *grip-federation*
 
 DuckDB can attach external databases and query across them in a single
 session. Grip exposes this through :GripAttach and :GripDetach commands.
@@ -1549,7 +1451,7 @@ Sidebar keymaps for federation (DuckDB connections only):
   gd              Detach attached database (prompts for alias)
 
 ==============================================================================
-24. S3 AND REMOTE FILES                                       *grip-s3-files*
+23. S3 AND REMOTE FILES                                       *grip-s3-files*
 
 DuckDB can query remote files directly via the httpfs extension.
 
@@ -1581,7 +1483,7 @@ environment. Public buckets work without credentials.
 DuckDB's httpfs extension installs automatically on first use.
 
 ==============================================================================
-25. HEALTH CHECK                                              *grip-health*
+24. HEALTH CHECK                                              *grip-health*
 
 Run the built-in health checker to verify your installation: >
   :checkhealth dadbod-grip
@@ -1595,10 +1497,6 @@ Checks performed:
                      Reports WARN for any missing (only the adapters you use
                      are required).
 
-  AI providers       Checks ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
-                     or an installed ollama executable. Ollama alone satisfies
-                     the check because it needs no API key.
-
 Example output: >
   dadbod-grip
     OK  Neovim >= 0.10
@@ -1607,7 +1505,6 @@ Example output: >
     WARN  mysql not found (required for that adapter)
     OK  duckdb found
     WARN  sqlcmd not found (required for that adapter)
-    OK  Anthropic API key set (ANTHROPIC_API_KEY)
 <
 
 ==============================================================================

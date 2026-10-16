@@ -1,4 +1,4 @@
--- config_spec.lua: tests for setup config options (completion, connections_path, etc.)
+-- config_spec.lua: tests for setup config options (connections_path, etc.)
 local grip = require("dadbod-grip")
 
 local pass = 0
@@ -17,35 +17,6 @@ end
 local function eq(a, b, msg)
   assert(a == b, (msg or "") .. ": expected " .. tostring(b) .. ", got " .. tostring(a))
 end
-
--- Config defaults
-
-test("default completion is true", function()
-  grip.setup({})
-  eq(grip.get_opts().completion, true, "default")
-end)
-
-test("explicit completion = true", function()
-  grip.setup({ completion = true })
-  eq(grip.get_opts().completion, true, "explicit true")
-end)
-
-test("completion = false", function()
-  grip.setup({ completion = false })
-  eq(grip.get_opts().completion, false, "set to false")
-end)
-
-test("completion persists across get_opts calls", function()
-  grip.setup({ completion = false })
-  eq(grip.get_opts().completion, false, "first call")
-  eq(grip.get_opts().completion, false, "second call")
-end)
-
-test("setup with no args preserves previous completion value", function()
-  grip.setup({ completion = true })
-  grip.setup()
-  eq(grip.get_opts().completion, true, "preserved after no-arg setup")
-end)
 
 -- get_opts returns all expected fields
 

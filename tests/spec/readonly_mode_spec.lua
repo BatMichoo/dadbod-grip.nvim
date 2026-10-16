@@ -454,7 +454,7 @@ end)
 --- :GripRename old new goes straight to db.execute with an ALTER TABLE.
 ---
 --- A grip session is installed on the current buffer unless opts.no_session:
---- :GripRename and :GripFill bail out early without one, so a spec that
+--- :GripRename bails out early without one, so a spec that
 --- skipped this would "pass" against a build with no read-only guard at all.
 local function capture(action, opts)
   opts = opts or {}
@@ -511,7 +511,6 @@ test("DDL commands decline on a read-only connection", function()
       { cmd = "GripDrop users",        name = "GripDrop" },
       { cmd = "GripCreate",            name = "GripCreate" },
       { cmd = "GripRename a b",        name = "GripRename" },
-      { cmd = "GripFill 1",            name = "GripFill" },
     }) do
       local msgs, ddl_calls = run_command(case.cmd)
       eq(#ddl_calls, 0, case.name .. " reached no DDL/execute path")
@@ -563,57 +562,6 @@ test("GripRename still renames when the session's connection is rw", function()
     eq(calls[1], "execute", "the ALTER ran: a ro *ambient* connection must not block a rw session")
     assert(not (msgs[1] or ""):find("read-only", 1, true),
       "no refusal: " .. tostring(msgs[1]))
-  end)
-end)
-
-test("GripFill guards the session's connection, not the ambient one", function()
-  with_connections(RO_URL, function(_, rw_sqlite)
-    grip.setup({})
-    -- Ambient ro, session rw: neither GripFill guard may refuse. The AI module
-    -- and the CLI are stubbed out -- reaching generate_rows is the assertion,
-    -- and letting the real one run would put a request on the network.
-    local adapters_mod = require("dadbod-grip.adapters")
-    local orig_run, orig_ai = adapters_mod.run_cmd, package.loaded["dadbod-grip.ai"]
-    local reached_ai = false
-    adapters_mod.run_cmd = function() return "", "", 0 end
-    package.loaded["dadbod-grip.ai"] = {
-      _format_ddl_line = function() return "users(id integer)" end,
-      generate_rows = function(_, _, _, _, _, cb) reached_ai = true; cb(nil, "stubbed") end,
-    }
-
-    local msgs = run_command("GripFill 1", { session_url = rw_sqlite })
-
-    adapters_mod.run_cmd = orig_run
-    package.loaded["dadbod-grip.ai"] = orig_ai
-    assert(reached_ai,
-      "a rw session must not be refused because the ambient connection is ro; got: "
-      .. tostring(msgs[1]))
-  end)
-end)
-
--- ── GripFill's two guards, one test each ──────────────────────────────────
--- :GripFill and the AI keymap are separate entry points into the same work,
--- and each has its own guard. The pair is not redundant, but only because the
--- command guard runs before do_fill_rows' session checks; these two tests pin
--- exactly that, so neither guard can be deleted as dead code.
-
-test("the :GripFill guard answers before the session checks do", function()
-  with_connections(RO_URL, function()
-    grip.setup({})
-    local msgs = run_command("GripFill 1", { no_session = true })
-    eq(msgs[1], "GripFill: Connection is read-only (mode = ro)",
-      "the mode is the reason, not the missing session")
-  end)
-end)
-
-test("the do_fill_rows guard covers the AI keymap path", function()
-  with_connections(RO_URL, function()
-    grip.setup({})
-    -- keymaps_ai.lua calls this directly, never going through :GripFill.
-    local msgs, calls = capture(function() grip.do_fill_rows(1) end)
-    eq(#calls, 0, "no DDL/execute reached")
-    eq(msgs[1], "GripFill: Connection is read-only (mode = ro)",
-      "the mode is the reason, not the adapter")
   end)
 end)
 
@@ -771,7 +719,6 @@ local function with_switchable(initial_url, fn)
     local saved = {
       schema     = package.loaded["dadbod-grip.schema"],
       query_pad  = package.loaded["dadbod-grip.query_pad"],
-      completion = package.loaded["dadbod-grip.completion"],
       conns      = package.loaded["dadbod-grip.connections"],
       open       = grip.open,
       welcome    = grip.open_welcome,
@@ -782,9 +729,6 @@ local function with_switchable(initial_url, fn)
       get_winid = function() return nil end,
     }
     package.loaded["dadbod-grip.query_pad"]  = { open = function() end }
-    package.loaded["dadbod-grip.completion"] = {
-      invalidate = function() end, warm_schema = function() end,
-    }
     grip.open, grip.open_welcome = function() end, function() end
     vim.notify = function() end  -- with_connections restores the original
     package.loaded["dadbod-grip.connections"] = nil
@@ -795,7 +739,6 @@ local function with_switchable(initial_url, fn)
 
     package.loaded["dadbod-grip.schema"]      = saved.schema
     package.loaded["dadbod-grip.query_pad"]   = saved.query_pad
-    package.loaded["dadbod-grip.completion"]  = saved.completion
     package.loaded["dadbod-grip.connections"] = saved.conns
     grip.open, grip.open_welcome = saved.open, saved.welcome
     vim.fn.getcwd = orig_getcwd

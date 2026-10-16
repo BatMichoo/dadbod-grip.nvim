@@ -844,9 +844,9 @@ local function build_render(session, opts)
     local mt = session.pending_mutation.type or "SQL"
     hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
   elseif st.readonly and not is_editable(session) then
-    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  gL:pin  gJ:switch  4-9:views  ?:help"
+    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
   else
-    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  gL:pin  gJ:switch  4-9:views  ?:help"
+    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
   end
   table.insert(lines, hints)
 
@@ -2301,7 +2301,7 @@ function M._fk_referencing(bufnr)
     return
   end
   -- effective_value returns nil for NULL originals, but staged INSERT rows
-  -- (insert_row_with_values: GripFill, INSERT mutation preview) can carry a
+  -- (insert_row_with_values: GripImport, INSERT mutation preview) can carry a
   -- raw "" that it passes through — keep treating "" as NULL here.
   if src_val == nil or src_val == "" then
     vim.notify("NULL value: cannot find referencing rows", vim.log.levels.INFO)
@@ -2539,7 +2539,6 @@ local KEYMAP_SECTIONS = {
   require("dadbod-grip.view.keymaps_aggregate"),
   require("dadbod-grip.view.keymaps_schema"),
   require("dadbod-grip.view.keymaps_session"),
-  require("dadbod-grip.view.keymaps_ai"),
   require("dadbod-grip.view.keymaps_results"),
   require("dadbod-grip.view.keymaps_tab_view"),
   require("dadbod-grip.view.column_highlight"),
@@ -2780,11 +2779,6 @@ function M.show_help(opts)
       "  q         Open query pad",
       "  gq        Load saved query",
       "  gh        Query history browser",
-      "  A         AI SQL generation",
-      "  gA        AI row fill: stage 1 generated row  :GripFill N for more",
-      "            ↳ context: schema DDL for <=30 tables (cols, types, PKs, FKs)",
-      "            ↳ provider: ANTHROPIC_API_KEY -> OPENAI -> GEMINI -> Ollama",
-      "            ↳ disable: setup({ ai = false }) skips schema pre-warm",
       "  :GripAttach  Attach external DB to DuckDB session",
       "  :GripDetach  Detach attached database",
       "  :GripOpen    Open file/HTTPS/s3:// without saving to connections",

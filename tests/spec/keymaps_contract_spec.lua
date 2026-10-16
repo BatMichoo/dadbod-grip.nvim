@@ -33,7 +33,6 @@ test("catalog metadata, defaults, and JSON agree", function()
     assert(type(record.category) == "string" and record.category ~= "")
     assert(type(record.surfaces) == "table" and #record.surfaces > 0)
     assert(type(record.modes) == "table" and #record.modes > 0)
-    assert(record.requires == nil or record.requires == "completion")
     assert(not seen[record.action], "duplicate action: " .. record.action)
     seen[record.action] = true
     defaults[record.action] = record.default
@@ -97,8 +96,6 @@ test("declared primary actions cover the corrected surfaces", function()
   assert(vim.deep_equal(record("schema_browser").surfaces, { "grid", "query_pad", "sidebar" }))
   assert(vim.deep_equal(record("goto_grid").surfaces, { "query_pad", "sidebar" }))
   assert(vim.deep_equal(record("open_notebook").surfaces, { "query_pad", "sidebar" }))
-  assert(vim.deep_equal(record("ai").surfaces, { "grid" }))
-  assert(includes(record("qpad_complete").modes, "i"))
 end)
 
 print(string.format("\nkeymaps_contract_spec: %d passed, %d failed", pass, fail))

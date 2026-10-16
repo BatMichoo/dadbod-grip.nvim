@@ -68,7 +68,6 @@ local function with_real_file(fn)
   local orig_open_welcome = grip.open_welcome
   local orig_schema = package.loaded["dadbod-grip.schema"]
   local orig_query_pad = package.loaded["dadbod-grip.query_pad"]
-  local orig_completion = package.loaded["dadbod-grip.completion"]
   local orig_connections = package.loaded["dadbod-grip.connections"]
 
   paths.project_root = function() return project_dir end
@@ -89,7 +88,6 @@ local function with_real_file(fn)
     get_right_win = function() return nil end,
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end, sync_query = function() end }
-  package.loaded["dadbod-grip.completion"] = { invalidate = function() end, warm_schema = function() end }
   package.loaded["dadbod-grip.connections"] = nil
   connections = require("dadbod-grip.connections")
   secrets.clear_cache()
@@ -108,7 +106,6 @@ local function with_real_file(fn)
   grip.open_welcome = orig_open_welcome
   package.loaded["dadbod-grip.schema"] = orig_schema
   package.loaded["dadbod-grip.query_pad"] = orig_query_pad
-  package.loaded["dadbod-grip.completion"] = orig_completion
   package.loaded["dadbod-grip.connections"] = orig_connections
   connections = orig_connections
   secrets.clear_cache()
@@ -886,14 +883,14 @@ test("DROP TABLE on a templated postgres connection still emits CASCADE", functi
   end)
 end)
 
-test("completion looks up duckdb attachments under the expanded URL", function()
+test("duckdb attachments are keyed by the expanded URL", function()
   with_real_file(function(local_grip, env_path)
     local url = seed_templated_conn(local_grip, env_path, "DUCK_URL", "duckdb::memory:")
     local duckdb = require("dadbod-grip.adapters.duckdb")
     duckdb._attach_unchecked("duckdb::memory:", "sqlite:/tmp/side.db", "side")
 
-    -- What completion.lua does for `alias.<tab>`: the registry is keyed by
-    -- the expanded URL, the buffer variable holds the template.
+    -- The registry is keyed by the expanded URL; the buffer variable holds
+    -- the template.
     eq(#duckdb.get_attachments(url), 0, "the template is not a registry key")
     eq(#duckdb.get_attachments(db.resolved_url(url)), 1, "the resolved URL is")
     duckdb.detach("duckdb::memory:", "side")

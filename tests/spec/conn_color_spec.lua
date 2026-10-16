@@ -230,7 +230,6 @@ local function with_real_file(fn)
   local orig_open_welcome = grip.open_welcome
   local orig_schema = package.loaded["dadbod-grip.schema"]
   local orig_query_pad = package.loaded["dadbod-grip.query_pad"]
-  local orig_completion = package.loaded["dadbod-grip.completion"]
   local orig_connections = package.loaded["dadbod-grip.connections"]
 
   paths.project_root = function() return project_dir end
@@ -250,7 +249,6 @@ local function with_real_file(fn)
     get_winid = function() return nil end,
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
-  package.loaded["dadbod-grip.completion"] = { invalidate = function() end, warm_schema = function() end }
   package.loaded["dadbod-grip.connections"] = nil
   connections = require("dadbod-grip.connections")
 
@@ -266,7 +264,6 @@ local function with_real_file(fn)
   grip.open_welcome = orig_open_welcome
   package.loaded["dadbod-grip.schema"] = orig_schema
   package.loaded["dadbod-grip.query_pad"] = orig_query_pad
-  package.loaded["dadbod-grip.completion"] = orig_completion
   package.loaded["dadbod-grip.connections"] = orig_connections
   connections = orig_connections
   require("dadbod-grip.view").set_connection_accent(nil)

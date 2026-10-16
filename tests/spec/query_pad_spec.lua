@@ -48,7 +48,7 @@ end
 
 do
   local b = make_pad()
-  set_lines(b, { "-- C-CR:run  gA:ai  go:tables", "" })
+  set_lines(b, { "-- C-CR:run  go:tables", "" })
   qp.sync_query("SELECT * FROM orders")
   local lines = get_lines(b)
   eq(lines[1], "SELECT * FROM orders", "hint pad: line 1 is the SQL")
@@ -89,7 +89,7 @@ end
 
 do
   local b = make_pad()
-  set_lines(b, { "-- C-CR:run  gA:ai", "" })  -- fresh hint-only pad
+  set_lines(b, { "-- C-CR:run", "" })  -- fresh hint-only pad
   qp.sync_query('SELECT * FROM "A"')
   qp.sync_query('SELECT * FROM "B"')
   qp.sync_query('SELECT * FROM "C"')
@@ -158,14 +158,14 @@ end
 do
   local b = make_pad()
   set_lines(b, {
-    "-- C-CR:run  gA:ai  go:tables",
+    "-- C-CR:run  go:tables",
     "",
     "SELECT id, name FROM customers",
     "WHERE active = true",
   })
   qp.sync_query("SELECT * FROM orders")
   local lines = get_lines(b)
-  eq(lines[1], "-- C-CR:run  gA:ai  go:tables", "hint+content: hint line preserved")
+  eq(lines[1], "-- C-CR:run  go:tables", "hint+content: hint line preserved")
   eq(lines[3], "SELECT id, name FROM customers", "hint+content: user query preserved")
   local last = lines[#lines]
   eq(last, "SELECT * FROM orders", "hint+content: new query appended at end")
@@ -200,19 +200,15 @@ do
   -- whitespace only
   eq(qp._has_real_content({ "   " }), false, "hrc: whitespace only = no content")
   -- hint-only (single)
-  eq(qp._has_real_content({ "-- C-CR:run  gA:ai  go:tables" }), false, "hrc: hint line only = no content")
+  eq(qp._has_real_content({ "-- C-CR:run  go:tables" }), false, "hrc: hint line only = no content")
   -- hint + blank line
-  eq(qp._has_real_content({ "-- C-CR:run  gA:ai  go:tables", "" }), false, "hrc: hint+blank = no content")
-  -- AI separator only
-  eq(qp._has_real_content({ "-- AI generated: SELECT 1" }), false, "hrc: ai-sep only = no content")
+  eq(qp._has_real_content({ "-- C-CR:run  go:tables", "" }), false, "hrc: hint+blank = no content")
   -- hint + real SQL
-  eq(qp._has_real_content({ "-- C-CR:run  gA:ai  go:tables", "", "SELECT 1" }), true, "hrc: hint+sql = has content")
+  eq(qp._has_real_content({ "-- C-CR:run  go:tables", "", "SELECT 1" }), true, "hrc: hint+sql = has content")
   -- real SQL (no hint)
   eq(qp._has_real_content({ "SELECT id FROM users" }), true, "hrc: plain sql = has content")
   -- multi-line SQL
   eq(qp._has_real_content({ "SELECT *", "FROM orders", "WHERE id = 1" }), true, "hrc: multiline sql = has content")
-  -- AI sep + real SQL below
-  eq(qp._has_real_content({ "-- AI generated:", "", "SELECT 42" }), true, "hrc: ai-sep+sql = has content")
 end
 
 -- ── _block_under_cursor ───────────────────────────────────────────────────────

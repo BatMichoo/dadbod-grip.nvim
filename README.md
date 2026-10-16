@@ -129,12 +129,11 @@ These commands cover the normal path:
 | `:Grip users` | Opens a table in an editable grid. |
 | `:Grip SELECT * FROM users` | Runs SQL and opens the result. |
 | `:GripQuery` | Opens the query pad. |
-| `:GripAsk` | Generates SQL from a natural-language request. |
 | `:GripExport` | Exports the current page or every matching row. |
 | `:GripImport` | Previews and stages CSV, TSV, or JSON rows from the clipboard or `!command`. |
 | `:GripHome` | Returns to the welcome screen. |
 
-In the query pad, `<C-CR>` runs SQL and `gA` generates SQL. In the grid, `f` filters by the current cell, `s` sorts the current column, `gf` follows a foreign key, and `gE` exports to the clipboard.
+In the query pad, `<C-CR>` runs SQL. In the grid, `f` filters by the current cell, `s` sorts the current column, `gf` follows a foreign key, and `gE` exports to the clipboard.
 
 The complete command and keymap reference lives in `:help dadbod-grip`. The [documentation website](https://jorypestorious.com/dadbod-grip-web/) provides task-focused guides and screenshots.
 
@@ -163,20 +162,19 @@ Dadbod Grip calls `setup()` with sensible defaults. Override only what you need:
 require("dadbod-grip").setup({
   limit = 100,
   timeout = 10000,
-  completion = true,
   open_sidebar = true,
 })
 ```
 
-Set `open_sidebar = false` to connect directly into the main workspace. Set `completion = false` when another completion engine owns SQL suggestions. Set `ai = false` to skip SQL generation and schema preloading; the AI keys remain registered and explain that AI is disabled.
+Set `open_sidebar = false` to connect directly into the main workspace.
 
-All default values, picker integrations, connection fields, remappable actions, and AI-provider options live in `:help grip-config` and the [getting-started guide](https://jorypestorious.com/dadbod-grip-web/docs/getting-started).
+All default values, picker integrations, connection fields, and remappable actions live in `:help grip-config` and the [getting-started guide](https://jorypestorious.com/dadbod-grip-web/docs/getting-started).
 
 ## Safety and privacy
 
 Dadbod Grip stages cell edits, inserted rows, and deletions in memory. Nothing reaches the database until you inspect the generated SQL and confirm the apply action. A connection with `"mode": "ro"` disables editing and asks the database client for a read-only session, but database permissions remain the real security boundary.
 
-Dadbod Grip sends all database SQL and AI request content through stdin. Statements, mutation values, prompts, schema context, existing SQL, and request bodies stay out of process arguments. API-key lookup commands also enter the shell through stdin.
+Dadbod Grip sends all database SQL through stdin. Statements and mutation values stay out of process arguments.
 
 For `:GripImport !command`, the parent shell receives the script through stdin, but child commands retain normal shell argument visibility. Pass credentials through environment variables, stdin, or configuration files instead of command arguments.
 
