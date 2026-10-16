@@ -2,6 +2,17 @@
 local M = {}
 local CATEGORIES = {"table", "view", "function", "procedure"}
 local TITLES = {table = "Tables", view = "Views", ["function"] = "Functions", procedure = "Procedures"}
+-- Folders under an expanded table, as in SSMS's Object Explorer. `view` is the
+-- grid view (view.switch_view) that <CR> on the folder or its items opens.
+M.FACETS = {
+  {key = "columns", title = "Columns", view = "columns"},
+  {key = "keys", title = "Keys", view = "fk"},
+  {key = "constraints", title = "Constraints", view = "constraints"},
+  {key = "indexes", title = "Indexes", view = "indexes"},
+}
+
+--- Fold key for one table folder in state.facets_expanded.
+function M.facet_key(table_name, facet) return table_name .. "\0" .. facet end
 
 local function schema_id(name) return "schema\0" .. name end
 local function partition_id(id) return "partitions\0" .. id end
@@ -79,6 +90,43 @@ function M.prune(state)
   local names = {}
   for _, object in ipairs(ix.objects) do if object.kind == "table" then names[object.item.name] = true end end
   for name in pairs(state.expanded or {}) do if not names[name] then state.expanded[name] = nil end end
+  for key in pairs(state.facets_expanded or {}) do
+    if not names[key:match("^(.-)%z") or key] then state.facets_expanded[key] = nil end
+  end
+end
+
+--- Item rows for one open table folder, from the sidebar's metadata caches.
+local function facet_items(state, table_name, facet)
+  local out = {}
+  if facet == "columns" then
+    for _, col in ipairs(state.col_cache[table_name] or {}) do
+      local fk = (state.fk_cache[table_name] or {})[col.column_name]
+      out[#out + 1] = {kind = "column", key = col.column_name, name = col.column_name,
+        data_type = col.data_type, pk = (state.pk_cache[table_name] or {})[col.column_name] or false,
+        fk = fk ~= nil, fk_ref = fk}
+    end
+  elseif facet == "keys" then
+    local pk_cols = (state.pk_list or {})[table_name] or {}
+    if #pk_cols > 0 then
+      out[#out + 1] = {kind = "facet_item", key = "pk", icon = "🔑", text = "PK (" .. table.concat(pk_cols, ", ") .. ")"}
+    end
+    local fk_cols = vim.tbl_keys(state.fk_cache[table_name] or {})
+    table.sort(fk_cols)
+    for _, col in ipairs(fk_cols) do
+      out[#out + 1] = {kind = "facet_item", key = "fk\0" .. col, icon = "🔗",
+        text = col .. " → " .. state.fk_cache[table_name][col]}
+    end
+  else
+    local cache = facet == "constraints" and state.constraint_cache or state.index_cache
+    for _, entry in ipairs((cache or {})[table_name] or {}) do
+      local cols = type(entry.columns) == "table" and table.concat(entry.columns, ", ") or entry.columns
+      local detail = entry.type and entry.type ~= "" and entry.type or nil
+      if facet == "indexes" and cols and cols ~= "" then detail = (detail and detail .. ": " or "") .. cols end
+      out[#out + 1] = {kind = "facet_item", key = entry.name or "", icon = " ",
+        text = (entry.name or "") .. (detail and ("  " .. detail) or "")}
+    end
+  end
+  return out
 end
 
 function M.build(state)
@@ -125,11 +173,21 @@ function M.build(state)
       display = label, type = item.type, expanded = not not body_open, columns_expanded = column_open,
       partition_id = group_id, matched = matches[id], relation_kind = item.relation_kind})
     if column_open then
-      for _, col in ipairs(state.col_cache[item.name] or {}) do
-        local fk = (state.fk_cache[item.name] or {})[col.column_name]
-        append({kind = "column", id = id .. "\0column\0" .. col.column_name, parent = id, depth = depth + 1,
-          name = col.column_name, data_type = col.data_type, table_name = item.name,
-          pk = (state.pk_cache[item.name] or {})[col.column_name] or false, fk = fk ~= nil, fk_ref = fk})
+      for _, facet in ipairs(M.FACETS) do
+        local fid = id .. "\0facet\0" .. facet.key
+        local open = (state.facets_expanded or {})[M.facet_key(item.name, facet.key)] == true
+        local count = facet.key == "columns" and state.col_cache[item.name]
+          and #state.col_cache[item.name] or nil
+        append({kind = "facet", facet = facet.key, view = facet.view, id = fid, parent = id,
+          depth = depth + 1, name = facet.title, count = count, table_name = item.name, expanded = open})
+        if open then
+          for _, entry in ipairs(facet_items(state, item.name, facet.key)) do
+            entry.id = fid .. "\0" .. entry.key
+            entry.parent, entry.depth, entry.table_name = fid, depth + 2, item.name
+            entry.facet, entry.view = facet.key, facet.view
+            append(entry)
+          end
+        end
       end
     end
     if children and body_open then

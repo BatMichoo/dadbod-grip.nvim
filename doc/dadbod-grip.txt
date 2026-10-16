@@ -330,8 +330,9 @@ All commands are global and available after the plugin loads.
 
                                                                *:GripSchema*
 :GripSchema
-  Open or focus the schema browser sidebar. Shows tables and views with
-  expandable columns, type abbreviations, and PK/FK markers. The `gb`
+  Open or focus the schema browser sidebar. Shows tables and views that
+  expand into Columns, Keys, Constraints, and Indexes folders. See
+  |grip-schema-folders|. The `gb`
   keymap focuses the sidebar from the grid or query pad, or closes it when
   already inside the sidebar.
 
@@ -863,13 +864,30 @@ visible direct children; browsing and expanding columns do not count data rows.
 Opening a parent table uses the normal parent query, including its partitions.
 Metadata visibility does not guarantee permission to query every column.
 
+Table folders ~
+                                                         *grip-schema-folders*
+As in SSMS's Object Explorer, an expanded table lists four folders:
+
+  Columns       column names, types, and PK/FK markers
+  Keys          the primary key and each foreign key
+  Constraints   constraint names and types
+  Indexes       index names, types, and columns
+
+Expanding a table runs no query. Each folder fetches its own metadata the
+first time it is opened, and keeps it until `r` refreshes the schema. <CR> on
+a folder or one of its items shows the matching view in the grid: Columns,
+Foreign Keys, Constraints, or Indexes. A grid already showing that table only
+switches view; otherwise the table opens first. Press 3 in the grid to return
+to its records.
+
 Schema browser keymaps:
-  <CR>            Open table/routine, or toggle schema/partition group
+  <CR>            Open table/routine, open a folder's view in the grid, or
+                  toggle schema/partition group
   <S-CR>          Open table in new split
-  l / zo          Expand group or table columns
+  l / zo          Expand group, table, or table folder
   h / zc          Collapse item, or move to its parent
   L               Expand every schema/partition level; keep existing columns
-  H               Collapse all groups and table columns
+  H               Collapse all groups, tables, and table folders
   /               Search hidden names and routine identity signatures
   n / N           Jump to next / previous visible table or routine
   F               Clear filter and restore the original folds and view
@@ -891,7 +909,7 @@ Schema browser keymaps:
 L and H apply to the whole sidebar. During filtering they change only the
 temporary matching tree. Press F, then L or H, to apply them to the complete
 catalog. Flat root objects remain visible because they have no schema group
-to collapse. Use l/zo on an individual table to load its columns.
+to collapse. Use l/zo on a table's Columns folder to load its columns.
 
 Search temporarily reveals matching paths without changing the saved folds.
 Editing a filter keeps the original pre-search view; cancelling leaves the
@@ -900,8 +918,8 @@ full identity signatures, and opening a PostgreSQL routine uses its exact OID.
 
 Labels remain complete in the buffer. Use `zh`/`zl` to scroll horizontally,
 `zH`/`zL` for half-window scrolling, or `0`/`$` to reach either end of a label.
-The window edge indicates clipped text. Columns load on explicit table
-expansion and show type abbreviations (int, text, bool, vc(255), etc.) with
+The window edge indicates clipped text. Columns load when the Columns folder
+is opened and show type abbreviations (int, text, bool, vc(255), etc.) with
 markers for primary keys and foreign keys.
 
 ==============================================================================

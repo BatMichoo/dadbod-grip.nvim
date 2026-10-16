@@ -23,14 +23,16 @@ local routines = {
 local function with_browser(fn, catalog)
   schema.close(); schema._reset_state()
   local original_win = vim.api.nvim_get_current_win()
-  local saved, opened, columns, queries, sources = {}, {}, {}, {}, {}
-  for _, key in ipairs({"list_tables","list_routines","get_column_info","get_primary_keys","get_foreign_keys","query","get_routine_source"}) do saved[key]=db[key] end
+  local saved, opened, columns, queries, sources, meta = {}, {}, {}, {}, {}, {}
+  for _, key in ipairs({"list_tables","list_routines","get_column_info","get_primary_keys","get_foreign_keys","query","get_routine_source","get_indexes","get_constraints"}) do saved[key]=db[key] end
   local real_open, real_input = grip.open, ui.input
   db.list_tables=function()return vim.deepcopy(catalog and catalog.items or items) end
   db.list_routines=function()return vim.deepcopy(catalog and catalog.routines or routines) end
   db.get_column_info=function(name) columns[#columns+1]=name;return {{column_name="id",data_type="integer"}} end
-  db.get_primary_keys=function()return {} end
-  db.get_foreign_keys=function()return {} end
+  db.get_primary_keys=function() meta[#meta+1]="pk";return {"id"} end
+  db.get_foreign_keys=function() meta[#meta+1]="fk";return {{column="owner_id",ref_table="users"}} end
+  db.get_indexes=function() meta[#meta+1]="indexes";return {{name="ix_owner",type="INDEX",columns={"owner_id"}}} end
+  db.get_constraints=function() meta[#meta+1]="constraints";return {{name="ck_positive",type="CHECK"}} end
   db.query=function(sql) queries[#queries+1]=sql;return {rows={{"1"}}} end
   db.get_routine_source=function(id) sources[#sources+1]=id;return "SELECT '"..id.."';" end
   grip.open=function(name)opened[#opened+1]=name end
@@ -59,7 +61,7 @@ local function with_browser(fn, catalog)
     return st.nodes[row-(st.filter and 4 or 2)]
   end
   local ok,err=pcall(fn,{state=st,win=win,select=select_node,press=press,current=current,
-    opened=opened,columns=columns,queries=queries,sources=sources,
+    opened=opened,columns=columns,queries=queries,sources=sources,meta=meta,
     lines=function()return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win),0,-1,false) end,
     filter=function(value)ui.input=function()return value end;press("/")end})
   schema.close(); schema._reset_state()
@@ -85,16 +87,80 @@ test("schema Enter and l aliases expose all object kinds without fetching column
   end)
 end)
 
-test("L opens partition structure while explicit l alone fetches columns",function()
+test("L opens partition structure while explicit l on the Columns folder alone fetches columns",function()
   with_browser(function(b)
     b.press("L")
     b.select("table","archive.capacity_p_2026_08_17")
     assert(#b.columns==0 and #b.queries==0,"expand-all eagerly loaded table metadata")
     b.select("table",long_name);b.press("l")
+    assert(#b.columns==0,"expanding a table must only list its folders")
+    b.select("facet","Columns");b.press("l")
     assert(#b.columns==1 and b.columns[1]==long_name)
     assert(#b.queries==0,"column expansion issued an exact COUNT")
     b.select("column","id");b.press("zc")
+    assert(b.current().kind=="facet" and b.current().name=="Columns","collapse did not select the folder")
+    b.press("zc")
     assert(b.current().kind=="table" and b.current().name==long_name,"collapse did not restore parent selection")
+  end)
+end)
+
+test("a table expands into SSMS folders and each folder queries only when opened",function()
+  with_browser(function(b)
+    b.press("L")
+    b.select("table",long_name);b.press("l")
+    local folders={}
+    for _,node in ipairs(b.state.nodes) do
+      if node.kind=="facet" and node.table_name==long_name then
+        folders[#folders+1]=node.name;assert(not node.expanded,"folders start collapsed")
+      end
+    end
+    assert(table.concat(folders,",")=="Columns,Keys,Constraints,Indexes",table.concat(folders,","))
+    assert(#b.columns==0 and #b.meta==0,"expanding the table ran metadata queries")
+
+    b.select("facet","Keys");b.press("l")
+    assert(table.concat(b.meta,",")=="pk,fk","Keys fetched only the keys: "..table.concat(b.meta,","))
+    local text=table.concat(b.lines(),"\n")
+    assert(text:find("PK (id)",1,true) and text:find("owner_id → users",1,true),text)
+
+    b.select("facet","Indexes");b.press("l")
+    assert(b.meta[#b.meta]=="indexes" and table.concat(b.lines(),"\n"):find("ix_owner",1,true))
+    b.select("facet","Constraints");b.press("l")
+    assert(b.meta[#b.meta]=="constraints" and table.concat(b.lines(),"\n"):find("ck_positive",1,true))
+    assert(#b.columns==0,"no folder but Columns loads column info")
+  end)
+end)
+
+test("Enter on a folder shows that view in the grid",function()
+  with_browser(function(b)
+    local view=require("dadbod-grip.view")
+    local real_find,real_switch=view.find_content_win,view.switch_view
+    local switched={}
+    view.switch_view=function(buf,name) switched[#switched+1]={buf,name} end
+    local ok,err=pcall(function()
+      b.press("L");b.select("table",long_name);b.press("l")
+
+      -- No grid on that table yet: the table opens first
+      view.find_content_win=function() return nil end
+      b.select("facet","Indexes");b.press("<CR>")
+      assert(b.opened[1]==long_name,"table was not opened")
+
+      -- A grid already on the table: only the view changes
+      vim.api.nvim_set_current_win(b.win)
+      vim.cmd("rightbelow vsplit")
+      local grid_win=vim.api.nvim_get_current_win()
+      local grid_buf=vim.api.nvim_create_buf(false,true)
+      vim.api.nvim_win_set_buf(grid_win,grid_buf)
+      view._sessions[grid_buf]={url=b.state.url,state={table_name=long_name}}
+      view.find_content_win=function() return grid_win end
+      b.select("facet","Keys");b.press("<CR>")
+      assert(#b.opened==1,"an open grid on the table was reopened")
+      assert(switched[#switched][1]==grid_buf and switched[#switched][2]=="fk","Keys shows the fk view")
+      b.select("facet","Constraints");b.press("<CR>")
+      assert(switched[#switched][2]=="constraints")
+      view._sessions[grid_buf]=nil
+    end)
+    view.find_content_win,view.switch_view=real_find,real_switch
+    assert(ok,err)
   end)
 end)
 
@@ -212,7 +278,8 @@ test("L and H act across the full large catalog from a routine row and preserve 
       end
     end
     assert(objects==1497 and #b.columns==0 and #b.queries==0)
-    b.select("table","accounts");b.press("l")
+    b.select("table","accounts");b.press("l");b.select("facet","Columns");b.press("l")
+    b.select("table","accounts")
     local selected=b.current().id
     b.press("L");b.press("L")
     assert(b.current().id==selected and b.state.expanded.accounts and #b.columns==1,
@@ -231,7 +298,7 @@ end)
 test("L and H during search only change temporary folds and F restores global folds and selection",function()
   with_browser(function(b)
     b.press("L")
-    b.select("table",long_name);b.press("l")
+    b.select("table",long_name);b.press("l");b.select("facet","Columns");b.press("l")
     b.select("table","archive.capacity_p_2026_08_17")
     local original=b.current().id
     local saved_groups,saved_columns=vim.deepcopy(b.state.groups_expanded),vim.deepcopy(b.state.expanded)
@@ -275,7 +342,7 @@ test("schema-less catalog still expands explicit partition depth and leaves flat
     b.select("routine","calc","102")
     b.press("H");assert(b.current().source_id=="102","H hid an ungrouped routine")
     b.press("<CR>");assert(b.sources[1]=="102")
-    b.select("table","ordinary");b.press("l");b.press("L")
+    b.select("table","ordinary");b.press("l");b.select("facet","Columns");b.press("l");b.press("L")
     assert(b.state.expanded.ordinary and #b.columns==1 and #b.queries==0)
     b.press("H");assert(not b.state.expanded.ordinary)
     b.filter("main.calc")

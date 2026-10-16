@@ -65,6 +65,7 @@ grip-requirements	dadbod-grip.txt	/*grip-requirements*
 grip-s3-files	dadbod-grip.txt	/*grip-s3-files*
 grip-saved-queries	dadbod-grip.txt	/*grip-saved-queries*
 grip-schema	dadbod-grip.txt	/*grip-schema*
+grip-schema-folders	dadbod-grip.txt	/*grip-schema-folders*
 grip-secrets	dadbod-grip.txt	/*grip-secrets*
 grip-sort-filter	dadbod-grip.txt	/*grip-sort-filter*
 grip-sort-filter-page	dadbod-grip.txt	/*grip-sort-filter-page*

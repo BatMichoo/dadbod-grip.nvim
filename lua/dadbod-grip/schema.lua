@@ -83,12 +83,22 @@ local function get_state(url)
       groups_expanded = {},
       col_cache = {},        -- table_name → column_info[]
       pk_cache = {},         -- table_name → set
+      pk_list = {},          -- table_name → ordered PK column names
       fk_cache = {},         -- table_name → fk_info[]
+      constraint_cache = {}, -- table_name → constraint[]
+      index_cache = {},      -- table_name → index[]
+      facets_expanded = {},  -- "table\0folder" → true: open folders under a table
       nodes = {},         -- flat rendered node list
       filter = nil,       -- search filter string
     }
   end
   return _states[url]
+end
+
+--- Drop every cached per-table metadata list so the next open folder refetches.
+local function clear_metadata(state)
+  state.col_cache, state.pk_cache, state.pk_list, state.fk_cache = {}, {}, {}, {}
+  state.constraint_cache, state.index_cache = {}, {}
 end
 
 --- Fetch table list for a persistent DB state.
@@ -132,23 +142,49 @@ local function fetch_file_schema(state)
   state.items = {}  -- Mark as fetched (empty = no DB tables, which is correct)
 end
 
---- Fetch column info for a table (lazy, cached).
-local function ensure_columns(state, table_name)
-  if state.col_cache[table_name] then return end
-
-  local cols = db.get_column_info(table_name, state.url)
-  state.col_cache[table_name] = cols or {}
-
+--- Fetch primary and foreign keys for a table (lazy, cached). Each ensure_*
+--- returns true when it queried, so the caller knows to rebuild the tree.
+local function ensure_keys(state, table_name)
+  if state.pk_cache[table_name] then return false end
   local pks = db.get_primary_keys(table_name, state.url)
   local pk_set = {}
   for _, pk in ipairs(pks or {}) do pk_set[pk] = true end
   state.pk_cache[table_name] = pk_set
+  state.pk_list[table_name] = pks or {}
 
   local fks = db.get_foreign_keys(table_name, state.url)
   local fk_map = {}
   for _, fk in ipairs(fks or {}) do fk_map[fk.column] = fk.ref_table end
   state.fk_cache[table_name] = fk_map
+  return true
 end
+
+--- Fetch column info for a table (lazy, cached). Keys come too, for the
+--- PK/FK markers on each column row.
+local function ensure_columns(state, table_name)
+  if state.col_cache[table_name] then return false end
+  local cols = db.get_column_info(table_name, state.url)
+  state.col_cache[table_name] = cols or {}
+  ensure_keys(state, table_name)
+  return true
+end
+
+--- Load what one open table folder lists. Expanding a table runs no query;
+--- each folder fetches its own metadata the first time it is opened.
+local FACET_LOADERS = {
+  columns = ensure_columns,
+  keys = ensure_keys,
+  constraints = function(state, table_name)
+    if state.constraint_cache[table_name] then return false end
+    state.constraint_cache[table_name] = db.get_constraints(table_name, state.url) or {}
+    return true
+  end,
+  indexes = function(state, table_name)
+    if state.index_cache[table_name] then return false end
+    state.index_cache[table_name] = db.get_indexes(table_name, state.url) or {}
+    return true
+  end,
+}
 
 --- Build flat node list from state.
 local function build_nodes(state)
@@ -184,8 +220,7 @@ local function build_nodes(state)
   nodes = tree.build(state)
   local loaded = false
   for _, node in ipairs(nodes) do
-    if node.kind == "table" and node.columns_expanded and not state.col_cache[node.name] then
-      ensure_columns(state, node.name)
+    if node.kind == "facet" and node.expanded and FACET_LOADERS[node.facet](state, node.table_name) then
       loaded = true
     end
   end
@@ -276,6 +311,11 @@ local function render(state, anchor)
       line(prefix .. node.name .. pad .. node.dtype)
       highlights[#highlights + 1] = {line = #lines - 1, col = #prefix + #node.name + #pad,
         end_col = #lines[#lines], hl = "GripReadonly"}
+    elseif node.kind == "facet" then
+      line(indent .. (node.expanded and " ▼ " or " ▶ ") .. node.name
+        .. (node.count and (" (" .. node.count .. ")") or ""), "GripHeader")
+    elseif node.kind == "facet_item" then
+      line(indent .. "  " .. node.icon .. " " .. node.text)
     elseif node.kind == "routine" then
       line(indent .. (node.type == "procedure" and " ◇ " or " ƒ ") .. (node.display or node.name))
     elseif node.kind == "sep" then
@@ -339,6 +379,26 @@ local function open_table_split(table_name, url)
     vim.api.nvim_set_current_win(target_win)
   end
   grip.open(table_name, url, { force_split = true })
+end
+
+--- Show a table's metadata view (columns, fk, constraints, indexes) in the
+--- grid, as selecting a folder in SSMS's Object Explorer does. A grid already
+--- on that table just switches view; otherwise the table opens first.
+local function open_table_view(table_name, url, view_name)
+  local view_mod = require("dadbod-grip.view")
+  local win = find_right_win()
+  local buf = win and vim.api.nvim_win_get_buf(win)
+  local session = buf and view_mod._sessions[buf]
+  if session and session.url == url and session.state and session.state.table_name == table_name then
+    vim.api.nvim_set_current_win(win)
+  else
+    open_table(table_name, url)
+    buf = vim.api.nvim_get_current_buf()
+    session = view_mod._sessions[buf]
+  end
+  if session and (session.current_view or "records") ~= view_name then
+    view_mod.switch_view(buf, view_name)
+  end
 end
 
 --- Open a routine definition in a read-only SQL buffer.
@@ -410,6 +470,7 @@ local function setup_keymaps(url)
   local function groups() return state.filter and state.search_groups or state.groups_expanded end
   local function columns() return state.filter and state.search_columns or state.expanded end
   local function is_group(node) return node.kind == "schema" or node.kind == "partitions" end
+  local tree = require("dadbod-grip.schema_tree")
   local function clear_filter()
     local anchor = state.search_restore or selection(state)
     state.filter, state.search_groups, state.search_columns, state.search_restore = nil, nil, nil, nil
@@ -441,8 +502,9 @@ local function setup_keymaps(url)
       end
     elseif node.kind == "table" then
       open_table(node.name, url)
-    elseif node.kind == "column" and node.table_name then
-      open_table(node.table_name, url)
+    elseif node.view and node.table_name then
+      -- A folder under a table, or one of its items: that view in the grid
+      open_table_view(node.table_name, url, node.view)
     elseif node.kind == "routine" then
       open_routine_source(node.source_id or node.name, url)
     end
@@ -455,7 +517,7 @@ local function setup_keymaps(url)
     if node.is_file then return end  -- file nodes have no separate split action
     if node.kind == "table" then
       open_table_split(node.name, url)
-    elseif node.kind == "column" and node.table_name then
+    elseif node.table_name then
       open_table_split(node.table_name, url)
     elseif node.kind == "routine" then
       open_routine_source(node.source_id or node.name, url)
@@ -467,6 +529,7 @@ local function setup_keymaps(url)
     if not node then return end
     if is_group(node) then groups()[node.id] = true
     elseif node.kind == "table" then columns()[node.file_key or node.name] = true
+    elseif node.kind == "facet" then state.facets_expanded[tree.facet_key(node.table_name, node.facet)] = true
     else return end
     render(state)
   end
@@ -479,8 +542,15 @@ local function setup_keymaps(url)
     elseif node.kind == "table" and node.expanded then
       columns()[node.file_key or node.name] = false
       if node.partition_id then groups()[node.partition_id] = false end
-    elseif node.kind == "column" then
-      columns()[node.is_file and "__file__" or node.table_name] = false
+    elseif node.kind == "facet" and node.expanded then
+      state.facets_expanded[tree.facet_key(node.table_name, node.facet)] = false
+    elseif node.kind == "facet" then
+      columns()[node.table_name] = false
+    elseif node.kind == "column" and node.is_file then
+      columns()["__file__"] = false
+    elseif node.facet then
+      -- An item: close the folder it sits in; the cursor lands on that folder
+      state.facets_expanded[tree.facet_key(node.table_name, node.facet)] = false
     else
       -- A root has no ancestor; collapsing it must not jump to another object.
       if not anchor.ids[2] then return end
@@ -503,6 +573,7 @@ local function setup_keymaps(url)
   end)
   kmap("sidebar_collap_all", function()
     for key in pairs(columns()) do columns()[key] = false end
+    state.facets_expanded = {}
     if state.file_cols then columns()["__file__"] = false
     else
       for _, id in ipairs(require("dadbod-grip.schema_tree").containers(state)) do groups()[id] = false end
@@ -538,9 +609,7 @@ local function setup_keymaps(url)
   local function do_refresh()
     ui.blocking("Grip: refreshing schema...", function()
       state.items = nil
-      state.col_cache = {}
-      state.pk_cache = {}
-      state.fk_cache = {}
+      clear_metadata(state)
       fetch_tables(state)
       render(state)
     end)
@@ -589,8 +658,7 @@ local function setup_keymaps(url)
       return
     end
 
-    local tbl = (node.kind == "table" and node.name)
-             or (node.kind == "column" and node.table_name)
+    local tbl = (node.kind == "table" and node.name) or node.table_name
     if not tbl then return end
 
     ensure_columns(state, tbl)
@@ -684,7 +752,7 @@ local function setup_keymaps(url)
     ddl.drop_table(node.name, url, function()
       state.items = nil
       state.routines = nil
-      state.col_cache = {}
+      clear_metadata(state)
       fetch_tables(state)
       render(state)
     end)
@@ -696,7 +764,7 @@ local function setup_keymaps(url)
     local ddl = require("dadbod-grip.ddl")
     ddl.create_table(url, function()
       state.items = nil
-      state.col_cache = {}
+      clear_metadata(state)
       fetch_tables(state)
       render(state)
     end)
@@ -718,8 +786,7 @@ local function setup_keymaps(url)
       return
     end
     local node = node_at_cursor(state)
-    local tbl = node and ((node.kind == "table" and node.name)
-                       or (node.kind == "column" and node.table_name))
+    local tbl = node and ((node.kind == "table" and node.name) or node.table_name)
     if tbl then
       open_table(tbl, url)
     else
@@ -737,8 +804,7 @@ local function setup_keymaps(url)
         end
         local node = node_at_cursor(state)
         if not node then return end
-        local tbl = (node.kind == "table" and node.name)
-                 or (node.kind == "column" and node.table_name)
+        local tbl = (node.kind == "table" and node.name) or node.table_name
         if not tbl then return end
         local grip = require("dadbod-grip")
         local target_win = find_right_win()
@@ -768,7 +834,7 @@ local function setup_keymaps(url)
   -- er_diagram: ER diagram float (scroll to table under cursor if on a table node)
   kmap("er_diagram", function()
     local node = node_at_cursor(state)
-    local tbl = node and ((node.kind == "table" and node.name) or (node.kind == "column" and node.table_name))
+    local tbl = node and ((node.kind == "table" and node.name) or node.table_name)
     if tbl then require("dadbod-grip.er_diagram").toggle(url, tbl, { focus = true }) end
   end)
 
@@ -1058,9 +1124,7 @@ function M.refresh(url)
   state.items = nil
   state.routines = nil
   state.file_cols = nil
-  state.col_cache = {}
-  state.pk_cache = {}
-  state.fk_cache = {}
+  clear_metadata(state)
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   if is_file_url(url) then
