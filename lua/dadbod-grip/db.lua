@@ -313,14 +313,15 @@ end
 ---     So the restore runs either way and the error is re-raised unchanged --
 ---     error(err, 0) adds no position of its own, so nothing is hidden.
 ---
---- Two values because that is the adapters' whole contract.
+--- Up to three values: the adapters' (result, err) contract, plus
+--- get_table_keys's (pks, fks, err).
 local function via_adapter(url, fn, ...)
   local previous = adapters.set_call_readonly(
     require("dadbod-grip.connections").current_mode(url) == "ro")
-  local ok, result, err = pcall(fn, ...)
+  local ok, a, b, c = pcall(fn, ...)
   adapters.set_call_readonly(previous)
-  if not ok then error(result, 0) end
-  return result, err
+  if not ok then error(a, 0) end
+  return a, b, c
 end
 
 -- ── public interface (unchanged signatures) ───────────────────────────────
@@ -335,6 +336,20 @@ function M.get_primary_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   return via_adapter(url, adapter.get_primary_keys, table_name, conn)
+end
+
+--- Primary and foreign keys together: (pks, fks, err). One round-trip when
+--- the adapter can answer both in one query, two otherwise.
+function M.get_table_keys(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return {}, {}, err end
+  if adapter.get_table_keys then
+    local pks, fks, kerr = via_adapter(url, adapter.get_table_keys, table_name, conn)
+    return pks or {}, fks or {}, kerr
+  end
+  local pks, pk_err = M.get_primary_keys(table_name, url)
+  local fks, fk_err = M.get_foreign_keys(table_name, url)
+  return pks or {}, fks or {}, pk_err or fk_err
 end
 
 function M.get_column_info(table_name, url)

@@ -1668,6 +1668,31 @@ test("sqlserver get_schema_batch_async: delivers columns keyed by table name", f
   assert(result["sales.leads"] ~= nil, "non-dbo schema keeps its prefix")
 end)
 
+test("sqlserver get_table_keys reads PKs and FKs from one sqlcmd run", function()
+  with_executable(function()
+    local adapters_mod = require("dadbod-grip.adapters")
+    local orig = adapters_mod.run_cmd
+    local runs, stdin = 0, nil
+    adapters_mod.run_cmd = function(_, _, opts)
+      runs = runs + 1; stdin = opts.stdin
+      return "key_kind\tcolumn_name\tref_table\tref_column\n-\t-\t-\t-\n"
+        .. "PK\tid\t\t\nPK\tline\t\t\nFK\towner_id\tusers\tid\n", "", 0
+    end
+    local ok, err = pcall(function()
+      local pks, fks, kerr = sqlserver.get_table_keys("sales.orders", "sqlserver://sa:pw@localhost/app")
+      eq(runs, 1, "one sqlcmd process")
+      eq(kerr, nil, "no error")
+      eq(table.concat(pks, ","), "id,line", "PKs in order")
+      eq(#fks, 1, "one FK")
+      eq(fks[1].column, "owner_id", "FK column")
+      eq(fks[1].ref_table, "users", "FK target")
+      assert(stdin:find("TABLE_SCHEMA = 'sales'", 1, true) and stdin:find("UNION ALL", 1, true), stdin)
+    end)
+    adapters_mod.run_cmd = orig
+    if not ok then error(err) end
+  end)
+end)
+
 test("sqlserver get_schema_batch_async: sqlcmd failure delivers nil", function()
   local result = "unset"
   with_executable(function()

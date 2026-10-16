@@ -460,36 +460,18 @@ function M.get_column_info(table_name, url)
   return cols, nil
 end
 
-function M.get_primary_keys(table_name, url)
-  local schema, tbl = split_table_name(table_name, "dbo")
-  local sql_str = string.format([[
-    SELECT kcu.COLUMN_NAME
+-- FROM/WHERE bodies shared by the single-purpose key lookups and the combined
+-- get_table_keys, so the two paths can never select different keys.
+local PK_FROM = [[
     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
     JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
       ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
       AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
     WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
       AND tc.TABLE_SCHEMA = '%s'
-      AND tc.TABLE_NAME = '%s'
-    ORDER BY kcu.ORDINAL_POSITION
-  ]], esc(schema), esc(tbl))
+      AND tc.TABLE_NAME = '%s']]
 
-  local result, err = run_query(sql_str, url)
-  if not result then return {}, err end
-  local pks = {}
-  for _, row in ipairs(result.rows) do
-    if row[1] and row[1] ~= "" then table.insert(pks, row[1]) end
-  end
-  return pks, nil
-end
-
-function M.get_foreign_keys(table_name, url)
-  local schema, tbl = split_table_name(table_name, "dbo")
-  local sql_str = string.format([[
-    SELECT
-      kcu.COLUMN_NAME,
-      ccu.TABLE_NAME AS ref_table,
-      ccu.COLUMN_NAME AS ref_column
+local FK_FROM = [[
     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
     JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
       ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
@@ -502,10 +484,28 @@ function M.get_foreign_keys(table_name, url)
       AND ccu.CONSTRAINT_SCHEMA = rc.UNIQUE_CONSTRAINT_SCHEMA
     WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
       AND tc.TABLE_SCHEMA = '%s'
-      AND tc.TABLE_NAME = '%s'
-    ORDER BY kcu.ORDINAL_POSITION
-  ]], esc(schema), esc(tbl))
+      AND tc.TABLE_NAME = '%s']]
 
+local function key_from(body, table_name)
+  local schema, tbl = split_table_name(table_name, "dbo")
+  return string.format(body, esc(schema), esc(tbl))
+end
+
+function M.get_primary_keys(table_name, url)
+  local sql_str = "SELECT kcu.COLUMN_NAME" .. key_from(PK_FROM, table_name)
+    .. "\n    ORDER BY kcu.ORDINAL_POSITION"
+  local result, err = run_query(sql_str, url)
+  if not result then return {}, err end
+  local pks = {}
+  for _, row in ipairs(result.rows) do
+    if row[1] and row[1] ~= "" then table.insert(pks, row[1]) end
+  end
+  return pks, nil
+end
+
+function M.get_foreign_keys(table_name, url)
+  local sql_str = "SELECT kcu.COLUMN_NAME, ccu.TABLE_NAME AS ref_table, ccu.COLUMN_NAME AS ref_column"
+    .. key_from(FK_FROM, table_name) .. "\n    ORDER BY kcu.ORDINAL_POSITION"
   local result, err = run_query(sql_str, url)
   if not result then return {}, err end
   local fks = {}
@@ -517,6 +517,29 @@ function M.get_foreign_keys(table_name, url)
     })
   end
   return fks, nil
+end
+
+--- Primary and foreign keys in one sqlcmd run: (pks, fks, err). Each sqlcmd
+--- process logs in again, so the sidebar's Keys folder asks for both at once.
+function M.get_table_keys(table_name, url)
+  local sql_str = "SELECT key_kind, column_name, ref_table, ref_column FROM (\n"
+    .. "    SELECT 'PK' AS key_kind, kcu.COLUMN_NAME AS column_name, '' AS ref_table,"
+    .. " '' AS ref_column, kcu.ORDINAL_POSITION AS pos" .. key_from(PK_FROM, table_name)
+    .. "\n    UNION ALL\n"
+    .. "    SELECT 'FK', kcu.COLUMN_NAME, ccu.TABLE_NAME, ccu.COLUMN_NAME, kcu.ORDINAL_POSITION"
+    .. key_from(FK_FROM, table_name)
+    .. "\n  ) k ORDER BY key_kind DESC, pos"
+  local result, err = run_query(sql_str, url)
+  if not result then return {}, {}, err end
+  local pks, fks = {}, {}
+  for _, row in ipairs(result.rows) do
+    if row[1] == "PK" and row[2] and row[2] ~= "" then
+      table.insert(pks, row[2])
+    elseif row[1] == "FK" then
+      table.insert(fks, { column = row[2] or "", ref_table = row[3] or "", ref_column = row[4] or "" })
+    end
+  end
+  return pks, fks, nil
 end
 
 --- The one schema-batch statement, shared by get_schema_batch and

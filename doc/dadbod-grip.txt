@@ -868,17 +868,18 @@ Table folders ~
                                                          *grip-schema-folders*
 As in SSMS's Object Explorer, an expanded table lists four folders:
 
-  Columns       column names, types, and PK/FK markers
+  Columns       column names and types; PK/FK markers once Keys has loaded
   Keys          the primary key and each foreign key
   Constraints   constraint names and types
   Indexes       index names, types, and columns
 
 <CR> on a table expands or collapses it, and runs no query; `s` opens its
-records. Each folder fetches its own metadata the first time it is opened, and keeps it until `r` refreshes the schema. <CR> on
-a folder or one of its items shows the matching view in the grid: Columns,
-Foreign Keys, Constraints, or Indexes. A grid already showing that table only
-switches view; otherwise the table opens first. Press 3 in the grid to return
-to its records.
+records. Each folder runs one query the first time it is opened (on SQL
+Server, Keys reads primary and foreign keys together) and keeps the result
+until `r` refreshes the schema. <CR> on a folder or one of its items shows
+the matching view in the grid: Columns, Foreign Keys, Constraints, or
+Indexes. A grid already showing that table only switches view; otherwise the
+table opens first. Press 3 in the grid to return to its records.
 
 Schema browser keymaps:
   <CR>            Expand/collapse a table or schema/partition group, open a
@@ -921,8 +922,8 @@ full identity signatures, and opening a PostgreSQL routine uses its exact OID.
 Labels remain complete in the buffer. Use `zh`/`zl` to scroll horizontally,
 `zH`/`zL` for half-window scrolling, or `0`/`$` to reach either end of a label.
 The window edge indicates clipped text. Columns load when the Columns folder
-is opened and show type abbreviations (int, text, bool, vc(255), etc.) with
-markers for primary keys and foreign keys.
+is opened and show type abbreviations (int, text, bool, vc(255), etc.), with
+primary- and foreign-key markers once the Keys folder has loaded the keys.
 
 ==============================================================================
 11. QUERY PAD                                             *grip-query-pad*

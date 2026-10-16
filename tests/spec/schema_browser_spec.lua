@@ -130,6 +130,18 @@ test("a table expands into SSMS folders and each folder queries only when opened
   end)
 end)
 
+test("the Columns folder runs one query; markers appear once Keys has loaded",function()
+  with_browser(function(b)
+    b.press("L");b.select("table","metrics.other");b.press("<CR>")
+    b.select("facet","Columns");b.press("l")
+    assert(#b.columns==1 and #b.meta==0,"Columns folder queried keys: "..table.concat(b.meta,","))
+    assert(not table.concat(b.lines(),"\n"):find("🔑",1,true),"marker without loaded keys")
+    b.select("facet","Keys");b.press("l")
+    assert(table.concat(b.meta,",")=="pk,fk")
+    assert(table.concat(b.lines(),"\n"):find("🔑  id",1,true),"PK marker after Keys loaded")
+  end)
+end)
+
 test("Enter on a table expands and collapses it; s opens its records",function()
   with_browser(function(b)
     b.press("L");b.select("table","metrics.other");b.press("<CR>")

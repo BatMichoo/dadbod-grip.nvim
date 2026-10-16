@@ -146,26 +146,25 @@ end
 --- returns true when it queried, so the caller knows to rebuild the tree.
 local function ensure_keys(state, table_name)
   if state.pk_cache[table_name] then return false end
-  local pks = db.get_primary_keys(table_name, state.url)
+  local pks, fks = db.get_table_keys(table_name, state.url)
   local pk_set = {}
-  for _, pk in ipairs(pks or {}) do pk_set[pk] = true end
+  for _, pk in ipairs(pks) do pk_set[pk] = true end
   state.pk_cache[table_name] = pk_set
-  state.pk_list[table_name] = pks or {}
+  state.pk_list[table_name] = pks
 
-  local fks = db.get_foreign_keys(table_name, state.url)
   local fk_map = {}
   for _, fk in ipairs(fks or {}) do fk_map[fk.column] = fk.ref_table end
   state.fk_cache[table_name] = fk_map
   return true
 end
 
---- Fetch column info for a table (lazy, cached). Keys come too, for the
---- PK/FK markers on each column row.
+--- Fetch column info for a table (lazy, cached). Columns only: the PK/FK
+--- markers show once the Keys folder has loaded the keys, never at the cost
+--- of another round-trip here.
 local function ensure_columns(state, table_name)
   if state.col_cache[table_name] then return false end
   local cols = db.get_column_info(table_name, state.url)
   state.col_cache[table_name] = cols or {}
-  ensure_keys(state, table_name)
   return true
 end
 
@@ -677,6 +676,7 @@ local function setup_keymaps(url)
     if not tbl then return end
 
     ensure_columns(state, tbl)
+    ensure_keys(state, tbl)
     local cols   = state.col_cache[tbl] or {}
     local pk_set = state.pk_cache[tbl]  or {}
 
