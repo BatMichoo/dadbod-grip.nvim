@@ -501,13 +501,28 @@ local function setup_keymaps(url)
         render(state)
       end
     elseif node.kind == "table" then
-      open_table(node.name, url)
+      -- As in SSMS, selecting a table expands it into its folders; s opens rows
+      if node.expanded then
+        columns()[node.name] = false
+        if node.partition_id then groups()[node.partition_id] = false end
+      else
+        columns()[node.name] = true
+      end
+      render(state)
     elseif node.view and node.table_name then
       -- A folder under a table, or one of its items: that view in the grid
       open_table_view(node.table_name, url, node.view)
     elseif node.kind == "routine" then
       open_routine_source(node.source_id or node.name, url)
     end
+  end)
+
+  -- s: the table's records, as SSMS's "Select Top Rows"; from a folder or item too
+  kmap("sidebar_select", function()
+    local node = node_at_cursor(state)
+    if not node or node.is_file then return end
+    local tbl = (node.kind == "table" and node.name) or node.table_name
+    if tbl then open_table(tbl, url) end
   end)
 
   -- Open table in new split (explicit second grid)

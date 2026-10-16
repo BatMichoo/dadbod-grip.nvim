@@ -210,14 +210,15 @@ add("query pad", query_pad, normal, {
 
 
 add("sidebar", sidebar, normal, {
-  { "sidebar_open", "<CR>", "Opens the object or toggles the group under the cursor." },
+  { "sidebar_open", "<CR>", "Toggles the table or group, or opens the folder view or routine under the cursor." },
+  { "sidebar_select", "s", "Opens the records of the table under the cursor." },
   { "sidebar_open_spl", "<S-CR>", "Opens the table under the cursor in a new split." },
-  { "sidebar_expand", "l", "Expands the group or table columns under the cursor." },
+  { "sidebar_expand", "l", "Expands the group, table, or table folder under the cursor." },
   { "sidebar_collapse", "h", "Collapses the item or moves to its parent." },
-  { "sidebar_expand_z", "zo", "Expands the group or table columns with the fold-style key." },
+  { "sidebar_expand_z", "zo", "Expands the group, table, or table folder with the fold-style key." },
   { "sidebar_collap_z", "zc", "Collapses the item or moves to its parent with the fold-style key." },
   { "sidebar_expand_all", "L", "Expands every schema and partition level without loading columns." },
-  { "sidebar_collap_all", "H", "Collapses all groups and table columns." },
+  { "sidebar_collap_all", "H", "Collapses all groups, tables, and table folders." },
   { "sidebar_filter", "/", "Searches hidden objects by name or routine signature." },
   { "sidebar_filter_c", "F", "Clears the sidebar filter and restores the original view." },
   { "sidebar_next", "n", "Moves to the next visible table or routine." },

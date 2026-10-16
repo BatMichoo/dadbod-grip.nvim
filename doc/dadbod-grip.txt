@@ -293,6 +293,7 @@ Action names (stable API) with their defaults:
 
   Schema sidebar ~
   sidebar_open     = "<CR>"    sidebar_open_spl = "<S-CR>"
+  sidebar_select   = "s"
   sidebar_expand   = "l"       sidebar_collapse = "h"
   sidebar_expand_z = "zo"      sidebar_collap_z = "zc"
   sidebar_expand_all  = "L"    sidebar_collap_all  = "H"
@@ -873,16 +874,18 @@ As in SSMS's Object Explorer, an expanded table lists four folders:
   Constraints   constraint names and types
   Indexes       index names, types, and columns
 
-Expanding a table runs no query. Each folder fetches its own metadata the
-first time it is opened, and keeps it until `r` refreshes the schema. <CR> on
+<CR> on a table expands or collapses it, and runs no query; `s` opens its
+records. Each folder fetches its own metadata the first time it is opened, and keeps it until `r` refreshes the schema. <CR> on
 a folder or one of its items shows the matching view in the grid: Columns,
 Foreign Keys, Constraints, or Indexes. A grid already showing that table only
 switches view; otherwise the table opens first. Press 3 in the grid to return
 to its records.
 
 Schema browser keymaps:
-  <CR>            Open table/routine, open a folder's view in the grid, or
-                  toggle schema/partition group
+  <CR>            Expand/collapse a table or schema/partition group, open a
+                  folder's view in the grid, or open a routine
+  s               Open the table's records (from the table, a folder, or
+                  an item), like SSMS's "Select Top Rows"
   <S-CR>          Open table in new split
   l / zo          Expand group, table, or table folder
   h / zc          Collapse item, or move to its parent

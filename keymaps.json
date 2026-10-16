@@ -932,7 +932,15 @@
     {
       "action": "sidebar_open",
       "default": "<CR>",
-      "description": "Opens the object or toggles the group under the cursor.",
+      "description": "Toggles the table or group, or opens the folder view or routine under the cursor.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_select",
+      "default": "s",
+      "description": "Opens the records of the table under the cursor.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -948,7 +956,7 @@
     {
       "action": "sidebar_expand",
       "default": "l",
-      "description": "Expands the group or table columns under the cursor.",
+      "description": "Expands the group, table, or table folder under the cursor.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -964,7 +972,7 @@
     {
       "action": "sidebar_expand_z",
       "default": "zo",
-      "description": "Expands the group or table columns with the fold-style key.",
+      "description": "Expands the group, table, or table folder with the fold-style key.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
@@ -988,7 +996,7 @@
     {
       "action": "sidebar_collap_all",
       "default": "H",
-      "description": "Collapses all groups and table columns.",
+      "description": "Collapses all groups, tables, and table folders.",
       "category": "sidebar",
       "surfaces": ["sidebar"],
       "modes": ["n"]
