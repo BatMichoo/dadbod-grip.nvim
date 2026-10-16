@@ -195,7 +195,7 @@ add("grid workflow", grid, normal, {
 })
 
 add("query pad", query_pad, { "n", "i", "x" }, {
-  { "qpad_execute", "<C-CR>", "Executes the current SQL block or selection." },
+  { "qpad_execute", "<F5>", "Executes the current SQL block or selection." },
 })
 
 add("query pad", query_pad, { "n", "x" }, {

@@ -203,6 +203,10 @@ do
   eq(qp._has_real_content({ "-- C-CR:run  go:tables" }), false, "hrc: hint line only = no content")
   -- hint + blank line
   eq(qp._has_real_content({ "-- C-CR:run  go:tables", "" }), false, "hrc: hint+blank = no content")
+  eq(qp._has_real_content({ "-- F5:run block or buffer  gn:notebooks", "" }), false,
+    "hrc: F5 hint = no content")
+  eq(qp._has_real_content({ "-- S-F5:run block or buffer", "SELECT 1" }), true,
+    "hrc: a remapped run key's hint is still the hint")
   -- hint + real SQL
   eq(qp._has_real_content({ "-- C-CR:run  go:tables", "", "SELECT 1" }), true, "hrc: hint+sql = has content")
   -- real SQL (no hint)

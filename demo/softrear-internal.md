@@ -12,7 +12,7 @@ Three questions:
 3. What decisions drove the company here, and how were they made?
 
 This notebook answers all three. Place your cursor inside any SQL block and press
-`<C-CR>` to run it. Results appear in the grid below. Move through the notebook
+`<F5>` to run it. Results appear in the grid below. Move through the notebook
 with `j`/`k`.
 
 DuckDB loads the full 505-roll investigation. The SQLite fallback keeps the same

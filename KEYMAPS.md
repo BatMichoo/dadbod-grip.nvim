@@ -196,7 +196,7 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | Key | Action |
 |-----|--------|
 | `<C-p>` | Command palette (searchable action list) |
-| `<C-CR>` | Execute query |
+| `<F5>` | Execute query |
 | `<S-CR>` | Execute and always open result in a new split (never reuses existing grid) |
 | `gF` | Format SQL (external tool cascade: sql-formatter -> pg_format -> sqlfluff -> Lua fallback) |
 | `gn` | Open notebook file (.md/.sql) in query pad |

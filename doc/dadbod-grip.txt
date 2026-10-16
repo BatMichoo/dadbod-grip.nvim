@@ -287,7 +287,7 @@ Action names (stable API) with their defaults:
   grid_results     = "gJ"
 
   Query pad ~
-  qpad_execute     = "<C-CR>"  qpad_execute_new = "<S-CR>"
+  qpad_execute     = "<F5>"    qpad_execute_new = "<S-CR>"
   qpad_save        = "<C-s>"   qpad_format      = "gF"
   qpad_close       = "q"
 
@@ -346,7 +346,7 @@ All commands are global and available after the plugin loads.
                                                                 *:GripQuery*
 :GripQuery [sql]
   Open a SQL query pad. Optionally pre-fill with a SQL string. In normal or
-  insert mode, press <C-CR> to execute the blank-line-delimited SQL block
+  insert mode, press <F5> to execute the blank-line-delimited SQL block
   under the cursor into a grip grid.
 
                                                                  *:GripSave*
@@ -915,7 +915,7 @@ anything. Clicking a table in the sidebar or picker appends the new query
 below existing SQL with a blank separator. The pad is only pre-filled when
 it is empty (or contains only the hint comment). Your work is never lost.
 
-`<C-CR>` in visual mode runs only the selected lines. In normal or insert
+`<F5>` in visual mode runs only the selected lines. In normal or insert
 mode it runs the blank-line-delimited SQL block under the cursor.
 
 Grip provides no SQL completion. The pad sets `b:db` to the connection URL,
@@ -923,8 +923,8 @@ so an external completion plugin such as vim-dadbod-completion can supply
 table and column names.
 
 Query pad keymaps:
-  <C-CR>          Execute the SQL block under the cursor (normal/insert)
-  <C-CR>          Execute visual selection into a grip grid (visual mode)
+  <F5>            Execute the SQL block under the cursor (normal/insert)
+  <F5>            Execute visual selection into a grip grid (visual mode)
   <S-CR>      Execute and always open result in a new split (never reuses
                   an existing grid, even an unpinned one)
   <C-s>           Save query with :GripSave

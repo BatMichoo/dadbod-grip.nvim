@@ -891,7 +891,7 @@
     },
     {
       "action": "qpad_execute",
-      "default": "<C-CR>",
+      "default": "<F5>",
       "description": "Executes the current SQL block or selection.",
       "category": "query pad",
       "surfaces": ["query_pad"],

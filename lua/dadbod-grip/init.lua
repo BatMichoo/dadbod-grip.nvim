@@ -1618,7 +1618,7 @@ function M.open_welcome()
     "  4   ER diagram               5-9 stats/cols/fk/idx",
     "",
     "  ── Query pad ───────────────────────────────────",
-    "  q       open pad             <C-CR>  run SQL block",
+    "  q       open pad             <F5>    run SQL block",
     "  gn      notebook picker      gh      query history",
     "  gq      load saved           <C-s>   save query",
     "",
@@ -2429,7 +2429,7 @@ function M.setup(opts)
         vim.bo[pad].modifiable = true
         vim.api.nvim_buf_set_lines(pad, 0, -1, false, lines)
         vim.bo[pad].modified = false
-        vim.notify("Softrear Inc. Analyst Portal\xe2\x84\xa2  \xc2\xb7  C-CR runs any SQL block", vim.log.levels.INFO)
+        vim.notify("Softrear Inc. Analyst Portal\xe2\x84\xa2  \xc2\xb7  F5 runs any SQL block", vim.log.levels.INFO)
       end)
     end)
   end, { desc = "Open the Softrear Inc. Analyst Portal" })

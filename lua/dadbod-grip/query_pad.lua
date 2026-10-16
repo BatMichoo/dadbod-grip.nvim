@@ -11,14 +11,22 @@ local _pad_bufnr = nil
 -- or authored (keep it, append below). nil = no auto-sync to reclaim.
 local _last_synced = nil
 
+--- True for the pad's hint comment, "-- <run key>:run block or buffer  ...".
+--- Matched on its shape rather than one key: the hint shows the configured
+--- qpad_execute key, and pads written with the old <C-CR> default still count.
+local function _is_hint(line)
+  return line:match("^%-%- %S+:run block or buffer") ~= nil
+    or line:match("^%-%- C%-CR:") ~= nil
+end
+
 --- Return true when `lines` contains real SQL content.
---- Strips the hint comment (-- C-CR:...) before deciding.
+--- Strips the hint comment (-- F5:run ...) before deciding.
 --- Blank/whitespace-only remaining lines = no real content.
 --- This is the single canonical check used by sync_query and M.open.
 local function _has_real_content(lines)
   local real = {}
   for _, line in ipairs(lines) do
-    if not line:match("^%-%- C%-CR:") then
+    if not _is_hint(line) then
       table.insert(real, line)
     end
   end
@@ -43,7 +51,8 @@ local function ensure_buf(url)
   vim.b[_pad_bufnr].db = url
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- C-CR:run block or buffer  gn:notebooks  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
+    "-- " .. (require("dadbod-grip.keymaps").get("qpad_execute") or "F5"):gsub("[<>]", "")
+      .. ":run block or buffer  gn:notebooks  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
     "",
   })
   -- Mark buffer as not modified after creation
@@ -153,12 +162,12 @@ M._block_under_cursor = _block_under_cursor  -- exported for unit tests
 --- blank line, so a "statement" is a maximal run of non-separator lines.
 local function _is_stmt_boundary(l)
   return l:match("^%s*$") ~= nil
-    or l:match("^%-%- C%-CR:") ~= nil
+    or _is_hint(l)
 end
 
 --- Return the single SQL statement to run for the cursor position. A ```sql fence
 --- wins (notebook mode); otherwise the blank-line-delimited paragraph around the
---- cursor. This keeps C-CR from executing the WHOLE pad — sync_query stacks a new
+--- cursor. This keeps the run key from executing the WHOLE pad — sync_query stacks a new
 --- SELECT each time you jump tables, and running all of them wraps 3 statements in
 --- one subquery → syntax error. Returns nil when the cursor isn't on any statement
 --- (caller falls back to the full buffer, which is correct for a single query).
@@ -198,7 +207,7 @@ local function _stmt_under_cursor(bufnr)
 end
 M._stmt_under_cursor = _stmt_under_cursor  -- exported for unit tests
 
---- The SQL a C-CR should run from the pad: the statement under the cursor when
+--- The SQL the run key (qpad_execute) should run from the pad: the statement under the cursor when
 --- there is one, else the whole pad (single-query case).
 local function _pad_sql_to_run(bufnr)
   local stmt = _stmt_under_cursor(bufnr)
@@ -643,7 +652,7 @@ function M.get_content()
   -- Filter out the hint comment line, keep real SQL
   local real = {}
   for _, line in ipairs(lines) do
-    if not line:match("^%-%- C%-CR:") then
+    if not _is_hint(line) then
       table.insert(real, line)
     end
   end
