@@ -57,6 +57,17 @@ local function parse_url(url)
   if parsed.server_certificate and parsed.trust_server_certificate then
     return nil, "SQL Server server_certificate cannot be combined with trust_server_certificate=true"
   end
+
+  -- Microsoft Entra ID (Azure AD) and other go-sqlcmd login methods, e.g.
+  -- authentication=ActiveDirectoryDefault to reuse an `az login` session.
+  -- Passed through to --authentication-method; sqlcmd validates the name.
+  local authentication = params.authentication
+  if authentication and authentication ~= "" then
+    if not authentication:match("^%a+$") then
+      return nil, "SQL Server authentication must be a sqlcmd authentication method name"
+    end
+    parsed.authentication = authentication
+  end
   return parsed
 end
 
@@ -100,8 +111,13 @@ local function sqlcmd_args(parsed)
   if parsed.user and parsed.user ~= "" then
     table.insert(args, 4, parsed.user)
     table.insert(args, 4, "-U")
-  else
+  elseif not parsed.authentication then
     table.insert(args, 4, "-E")
+  end
+
+  if parsed.authentication then
+    table.insert(args, 4, parsed.authentication)
+    table.insert(args, 4, "--authentication-method")
   end
 
   return args

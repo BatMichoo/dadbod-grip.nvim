@@ -1289,6 +1289,16 @@ and mssql:// accept these URL query parameters:
 server_certificate cannot be combined with trust_server_certificate=true
 and requires mandatory or strict encryption.
 
+To log in with Microsoft Entra ID (Azure AD) instead of a SQL login, add
+authentication=<method>. It is passed to sqlcmd as --authentication-method,
+which requires the go-sqlcmd client (mssql-tools sqlcmd does not support it).
+ActiveDirectoryDefault reuses an `az login` session:
+
+  sqlserver://myserver.database.windows.net/mydb?authentication=ActiveDirectoryDefault
+
+Without authentication= and without a user, sqlcmd uses integrated (-E)
+authentication as before.
+
 Each SQL Server submission starts a new sqlcmd session. Create and use #temp
 or ##temp tables in the same submitted block or visual selection. GO-separated
 batches in one submission share that session, but temporary tables do not
