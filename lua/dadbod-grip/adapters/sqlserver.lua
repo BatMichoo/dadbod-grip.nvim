@@ -10,6 +10,19 @@ local M = { readonly = true }
 
 local DEFAULT_TIMEOUT = 30000
 
+--- go-sqlcmd answers --version; mssql-tools sqlcmd rejects it with exit 1.
+--- Cached per session: the binary does not change under a running Neovim.
+local _is_go_sqlcmd
+local function is_go_sqlcmd()
+  if _is_go_sqlcmd == nil then
+    local ok, result = pcall(function()
+      return vim.system({ "sqlcmd", "--version" }, { text = true }):wait(5000)
+    end)
+    _is_go_sqlcmd = ok and result.code == 0
+  end
+  return _is_go_sqlcmd
+end
+
 local function decode_query_value(value)
   return (value:gsub("+", " "):gsub("%%(%x%x)", function(hex)
     return string.char(tonumber(hex, 16))
@@ -96,6 +109,14 @@ local function sqlcmd_args(parsed)
     -- reported as a success.
     "-b",
   }
+
+  -- Both clients cut (n)varchar(max)/xml values at 256 characters by default,
+  -- which breaks long JSON cells. go-sqlcmd allows -y 0 (unlimited) next to
+  -- -W; mssql-tools sqlcmd rejects -y combined with -W, so it keeps the limit.
+  if is_go_sqlcmd() then
+    args[#args + 1] = "-y"
+    args[#args + 1] = "0"
+  end
 
   if parsed.trust_server_certificate then args[#args + 1] = "-C" end
   if parsed.server_certificate then
@@ -651,6 +672,7 @@ function M.explain(sql_str, url)
 end
 
 M._parse_url = parse_url
+M._set_go_sqlcmd = function(value) _is_go_sqlcmd = value end
 M._parse_sqlcmd_table = parse_sqlcmd_table
 M._sqlcmd_args = sqlcmd_args
 M._sqlcmd_env = sqlcmd_env

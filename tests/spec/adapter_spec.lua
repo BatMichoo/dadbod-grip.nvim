@@ -456,6 +456,26 @@ test("sqlserver TLS defaults to validation and allows explicit local trust", fun
   has_arg(args, "-C", "explicit certificate bypass")
 end)
 
+test("sqlserver lifts the 256-char max-type limit only for go-sqlcmd", function()
+  local parsed = assert(sqlserver._parse_url("sqlserver://sa:pw@db/app"))
+  local function has_y0(args)
+    for i, a in ipairs(args) do
+      if a == "-y" and args[i + 1] == "0" then return true end
+    end
+    return false
+  end
+
+  sqlserver._set_go_sqlcmd(true)
+  local args = sqlserver._sqlcmd_args(parsed, "SELECT 1")
+  assert(has_y0(args), "go-sqlcmd gets -y 0")
+  has_arg(args, "-W", "-W kept alongside -y 0")
+
+  sqlserver._set_go_sqlcmd(false)
+  assert(not has_y0(sqlserver._sqlcmd_args(parsed, "SELECT 1")),
+    "mssql-tools sqlcmd rejects -y with -W")
+  sqlserver._set_go_sqlcmd(nil)
+end)
+
 test("sqlserver stdin terminates the final batch with GO exactly once", function()
   local stdin = sqlserver._sqlcmd_stdin("SELECT 1")
   contains(stdin, "SET NOCOUNT ON;", "session settings kept")
