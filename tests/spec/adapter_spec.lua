@@ -456,6 +456,20 @@ test("sqlserver TLS defaults to validation and allows explicit local trust", fun
   has_arg(args, "-C", "explicit certificate bypass")
 end)
 
+test("sqlserver stdin terminates the final batch with GO exactly once", function()
+  local stdin = sqlserver._sqlcmd_stdin("SELECT 1")
+  contains(stdin, "SET NOCOUNT ON;", "session settings kept")
+  eq(stdin:sub(-12), "SELECT 1\nGO\n", "unterminated batch gets GO for go-sqlcmd")
+
+  local already = sqlserver._sqlcmd_stdin("SELECT 1\nGO\n")
+  local _, count = already:gsub("\nGO\n", "")
+  eq(count, 1, "existing trailing GO not doubled")
+
+  local lower = sqlserver._sqlcmd_stdin("SELECT 1\ngo")
+  _, count = lower:gsub("\n[Gg][Oo]\n", "")
+  eq(count, 1, "lowercase trailing go not doubled")
+end)
+
 test("sqlserver authentication URL option maps to --authentication-method", function()
   local parsed = assert(sqlserver._parse_url(
     "sqlserver://db.database.windows.net/app?authentication=ActiveDirectoryDefault"))

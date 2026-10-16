@@ -123,12 +123,17 @@ local function sqlcmd_args(parsed)
   return args
 end
 
---- Prefix the session settings required by ordinary query execution.
+--- Prefix the session settings required by ordinary query execution, and
+--- terminate the final batch with GO: mssql-tools sqlcmd runs a trailing
+--- unterminated batch at EOF, but go-sqlcmd silently drops it.
 local function sqlcmd_stdin(sql_str, opts)
   opts = opts or {}
   local session = "SET QUOTED_IDENTIFIER ON;\n"
   if opts.nocount ~= false then session = session .. "SET NOCOUNT ON;\n" end
-  return session .. sql_str
+  local terminator = "\nGO\n"
+  local last_line = sql_str:match("([^\n]*)%s*$") or ""
+  if last_line:match("^%s*[Gg][Oo]%s*$") then terminator = "\n" end
+  return session .. sql_str .. terminator
 end
 
 --- opts.env for one sqlcmd invocation: SQLCMDPASSWORD carrying the password so
