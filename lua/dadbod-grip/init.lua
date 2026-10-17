@@ -43,14 +43,6 @@ end
 
 -- ── helpers ───────────────────────────────────────────────────────────────
 
---- Re-render a grip buffer if it's still valid and has a session.
-function M._render_if_visible(bufnr)
-  local s = view._sessions[bufnr]
-  if s and vim.api.nvim_buf_is_valid(bufnr) then
-    view.render(bufnr, s.state)
-  end
-end
-
 --- Detect if arg is a queryable file path or URL for DuckDB file-as-table.
 local function is_queryable_file(arg)
   local is_path = arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")

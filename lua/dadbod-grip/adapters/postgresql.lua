@@ -33,8 +33,8 @@ end
 --- itself when a password is embedded in the connection string; once
 --- strip_password below pulls the password out of the URL and hands it to
 --- psql via PGPASSWORD instead, this restores that same decoding so libpq
---- still sees the password it would have seen (sql.lua:80-82 documents that
---- URLs otherwise go to CLI clients verbatim -- this is the one exception).
+--- still sees the password it would have seen (URLs otherwise go to CLI
+--- clients verbatim -- this is the one exception).
 local function percent_decode(s)
   return (s:gsub("%%(%x%x)", function(hex)
     return string.char(tonumber(hex, 16))

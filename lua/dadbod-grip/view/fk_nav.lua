@@ -20,7 +20,7 @@ end
 --- and never goes through init.open(), so each in-place jump must sync itself —
 --- otherwise the pad keeps advertising the table you started from, three FK hops
 --- ago. clean_sql() keeps this honest: the pinned FK clause is included (the pad
---- describes the rows on screen) while sorts, user filters and pagination are not.
+--- describes the rows on screen) while sorts and user filters are not.
 function M._sync_pad(spec, url)
   if not spec then return end
   local kind = require("dadbod-grip.db").kind(url)

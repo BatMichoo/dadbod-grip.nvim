@@ -122,8 +122,6 @@ local function _build_actions()
     act("[filter]   Clear all filters",      k("grid_filter_clear"),"Remove all active column filters",                            { "grid" }),
     act("[filter]   Reset view",             k("grid_reset_view"),  "Clear sort and filter",                                       { "grid" }),
 
-    -- ── Pagination ─────────────────────────────────────────────────────────
-
     -- ── Analysis ──────────────────────────────────────────────────────────
     act("[analysis] Aggregate column",       k("grid_aggregate"),   "Count, sum, avg, min, max for this column",                   { "grid" }),
     act("[analysis] Column statistics",      k("grid_col_stats"),   "Distinct values, null%, top values popup",                    { "grid" }),

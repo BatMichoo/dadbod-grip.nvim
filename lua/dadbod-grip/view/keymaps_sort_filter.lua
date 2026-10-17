@@ -9,7 +9,7 @@ local ui     = require("dadbod-grip.ui")
 
 local M = {}
 
---- Sorting, filtering, filter presets, export-to-file and pagination.
+--- Sorting, filtering, filter presets and export-to-file.
 function M.setup(bufnr, ctx)
   local view = ctx.view
   local kmap = ctx.kmap

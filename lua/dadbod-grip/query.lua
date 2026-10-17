@@ -84,13 +84,6 @@ function M.add_sort(spec, column)
   return new
 end
 
---- Clear all sorts.
-function M.clear_sorts(spec)
-  local new = deep_copy(spec)
-  new.sorts = {}
-  return new
-end
-
 --- Get sort indicator for a column header.
 --- Returns "▲", "▼", "▲1", "▼2", or nil.
 function M.get_sort_indicator(spec, column)
@@ -226,19 +219,6 @@ function M.has_filters(spec)
   return #M.user_filters(spec) > 0
 end
 
---- Human-readable filter summary (full clauses, no truncation).
-function M.filter_summary(spec)
-  if #spec.filters == 0 then return "" end
-  if #spec.filters == 1 then
-    return "filter: " .. spec.filters[1].clause
-  end
-  local parts = {}
-  for _, f in ipairs(spec.filters) do
-    table.insert(parts, f.clause)
-  end
-  return "filters: " .. table.concat(parts, "  \xC2\xB7  ")
-end
-
 --- Replace the user's filters with a single clause (for loading presets).
 --- Pinned filters are kept and stay first, so a preset narrows the FK context
 --- instead of escaping it.
@@ -336,7 +316,7 @@ function M.build_count_sql(spec)
   return table.concat(parts, " ")
 end
 
---- Return the user-visible SQL for a spec (no pagination wrapper).
+--- Return the user-visible SQL for a spec (no sort/filter wrapper).
 --- Use this to pre-fill the query pad. build_sql() is for DB execution only.
 --- For raw specs returns spec.base_sql; for table specs returns
 --- 'SELECT * FROM table' plus the WHERE of any pinned filters. Identifiers are
@@ -344,7 +324,7 @@ end
 --- still runs as-is against reserved-word or, on Postgres, mixed-case tables.
 --- Pinned filters are included because they define which rows the grid is showing
 --- (FK navigation): without them the pad would advertise a query returning a
---- different result set than the grid below it. User filters, sorts and pagination
+--- different result set than the grid below it. User filters, sorts and the row cap
 --- are excluded — those are transient view state, and rewriting the pad on every
 --- f/s/H keypress would clobber whatever the user is composing there.
 function M.clean_sql(spec, kind)

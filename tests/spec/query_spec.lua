@@ -194,27 +194,6 @@ test("has_filters: true after filter", function()
   eq(query.has_filters(spec2), true)
 end)
 
-test("filter_summary: empty when no filters", function()
-  local spec = query.new_table("users", 100)
-  eq(query.filter_summary(spec), "")
-end)
-
-test("filter_summary: shows clause for single filter", function()
-  local spec = query.new_table("users", 100)
-  local spec2 = query.add_filter(spec, "age > 20")
-  eq(query.filter_summary(spec2), "filter: age > 20")
-end)
-
-test("filter_summary: shows all clauses for multiple filters", function()
-  local spec = query.new_table("users", 100)
-  local spec2 = query.add_filter(spec, "a = 1")
-  local spec3 = query.add_filter(spec2, "b = 2")
-  local summary = query.filter_summary(spec3)
-  assert(summary:find("a = 1", 1, true), "expected 'a = 1' in: " .. summary)
-  assert(summary:find("b = 2", 1, true), "expected 'b = 2' in: " .. summary)
-  assert(summary:find("filters:", 1, true), "expected 'filters:' prefix in: " .. summary)
-end)
-
 -- ── set_filters (for filter presets) ─────────────────────────────────────────
 
 test("set_filters: replaces all existing filters with single clause", function()
@@ -366,17 +345,6 @@ end)
 test("build_filter_clause: NOT NULL generates IS NOT NULL", function()
   local clause = query.build_filter_clause("col", "NOT NULL", nil)
   eq(clause, '"col" IS NOT NULL')
-end)
-
-test("filter_summary: long clauses not truncated", function()
-  local spec = query.new_table("users", 100)
-  local long_clause = '"some_very_long_column_name" LIKE \'%a_very_long_search_value%\''
-  local spec2 = query.add_filter(spec, long_clause)
-  local spec3 = query.add_filter(spec2, "another = 1")
-  local summary = query.filter_summary(spec3)
-  -- Must contain the full clause without any "..." truncation
-  assert(summary:find(long_clause, 1, true), "long clause must appear in full: " .. summary)
-  assert(not summary:find("...", 1, true), "must not truncate with '...': " .. summary)
 end)
 
 -- ── clean_sql ────────────────────────────────────────────────────────────────

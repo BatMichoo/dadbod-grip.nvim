@@ -51,7 +51,7 @@ local function fmt_size(bytes)
 end
 
 --- Scan cwd for supported data files and return them as picker-ready items.
---- Scans root of cwd and one level of subdirectories (data/, demo/, etc.).
+--- Scans root of cwd and one level of subdirectories (data/, etc.).
 --- Files are sorted alphabetically by display name.
 local function scan_local_files()
   local cwd = vim.fn.getcwd()

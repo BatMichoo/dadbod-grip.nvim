@@ -47,7 +47,7 @@ local function ro_toggle_applies(c)
   -- A file connection has no server session to put in read-only mode;
   -- !:write is the flag that matters there.
   if c.type == "file" or (not c.type and is_file_url(c.url)) then return false end
-  -- SQL Server is read-only at the adapter (adapters/sqlserver.lua:9), so
+  -- SQL Server is read-only at the adapter (`readonly = true`), so
   -- offering to toggle its mode would promise a write path that does not
   -- exist. Resolved first: a whole-URL template hides the scheme, and an
   -- unresolvable one falls back to the template, which simply does not match.

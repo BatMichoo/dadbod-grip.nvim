@@ -256,7 +256,7 @@ local function scan_notebooks()
       })
     end
   end
-  for _, pat in ipairs({ "demo/*.md", "notebooks/*.md", "*.md", "*.sql" }) do
+  for _, pat in ipairs({ "notebooks/*.md", "*.md", "*.sql" }) do
     for _, p in ipairs(vim.fn.glob(root .. "/" .. pat, false, true)) do
       add(p)
     end

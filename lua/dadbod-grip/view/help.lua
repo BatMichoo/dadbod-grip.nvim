@@ -49,7 +49,7 @@ function M.show_help(opts)
       "  gY        Yank entire table as CSV",
       "  gy        Yank table as Markdown pipe table",
       "",
-      "  Sort / Filter / Pagination",
+      "  Sort / Filter",
       "  s         Toggle sort on column (ASC→DESC→off)",
       "  S         Stack sort on column (stackable: press S on multiple cols for ▲1 ▼2 ▲3)",
       "  f         Quick filter by cell value",

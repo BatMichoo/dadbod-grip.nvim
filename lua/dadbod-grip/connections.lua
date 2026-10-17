@@ -848,8 +848,4 @@ function M.pick(opts)
   return require("dadbod-grip.connections.picker").pick(opts)
 end
 
-function M.grip_dir_path()
-  return grip_dir()
-end
-
 return M

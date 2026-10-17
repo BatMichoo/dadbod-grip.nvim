@@ -24,8 +24,7 @@ end
 --- than a connection: adapters.kind() / display_name() dispatch on the
 --- scheme, and a whole-URL template ("${DATABASE_URL}") has none to dispatch
 --- on. Getting nil back there is not cosmetic -- it silently drops CASCADE
---- from generated DDL, discards FK dependents, degrades Query Doctor, and
---- feeds the wrong dialect to the LLM.
+--- from generated DDL, discards FK dependents and degrades Query Doctor.
 ---
 --- Best-effort by design: an unresolvable template comes back unchanged, so
 --- those callers degrade to exactly what they did before this feature instead
@@ -311,8 +310,8 @@ end
 ---     of the outer one falling back to the ambient connection -- the same
 ---     defect this function exists to fix, just harder to see.
 ---   * "Adapters return (result, err)" is a statement about their return
----     convention, not a promise that no Lua error is ever raised inside one;
----     init.lua:2329 pcalls a db_mod call for exactly that reason. Without the
+---     convention, not a promise that no Lua error is ever raised inside one,
+---     and some callers pcall db calls for exactly that reason. Without the
 ---     pcall here a throw would strand the published value, and with a bare
 ---     save/restore it would strand the *inner* frame's value, which is worse.
 ---     So the restore runs either way and the error is re-raised unchanged --
