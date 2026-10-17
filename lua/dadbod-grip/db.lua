@@ -485,6 +485,22 @@ function M.is_readonly(url)
   return require("dadbod-grip.connections").current_mode(url) == "ro"
 end
 
+-- Identifier quoting and the column-stats type rules for adapters that
+-- declare none (see adapters/*.lua `stats_dialect`).
+local DEFAULT_STATS_DIALECT = {
+  quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end,
+  text = "TEXT",
+}
+
+--- The adapter's rules for the grid's column-stats query: `quote(name)` for
+--- identifiers, `text` (the type MIN/MAX are cast to for display), and the
+--- optional sets `no_compare` (types the aggregates reject) and `cast_from`
+--- (type -> cast that makes it comparable).
+function M.stats_dialect(url)
+  local adapter = resolve(url)
+  return adapter and adapter.stats_dialect or DEFAULT_STATS_DIALECT
+end
+
 --- List database routines for schema browsers.
 --- Returns { {name, display, type}, ... }. Unsupported adapters return empty.
 function M.list_routines(url)

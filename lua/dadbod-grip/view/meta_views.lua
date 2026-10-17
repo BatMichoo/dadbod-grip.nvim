@@ -145,31 +145,6 @@ local function fetch_view_constraints(table_name, url, session)
   return columns, rows, nil
 end
 
--- Per-dialect pieces of the stats query: identifier quoting, the type MIN/MAX
--- are cast to for display, the column types the aggregates reject outright
--- (no_compare), and the types that compare once cast (cast_from: type -> cast).
-local STATS_DIALECT = {
-  default = { quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end, text = "TEXT" },
-  mysql = { quote = function(n) return "`" .. n:gsub("`", "``") .. "`" end, text = "CHAR" },
-  postgresql = {
-    quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end,
-    text = "TEXT",
-    -- Geometric types have no equality, so not even COUNT(DISTINCT) works.
-    no_compare = { point = true, line = true, lseg = true, box = true, path = true, polygon = true, circle = true },
-    -- No min/max for these (json has no equality either). Enums, domains and
-    -- extension types report USER-DEFINED; text is the one cast all of them take.
-    cast_from = { uuid = "TEXT", boolean = "INT", json = "TEXT", jsonb = "TEXT", xml = "TEXT",
-      array = "TEXT", ["user-defined"] = "TEXT" },
-  },
-  sqlserver = {
-    quote = function(n) return "[" .. n:gsub("%]", "]]") .. "]" end,
-    text = "NVARCHAR(100)",
-    no_compare = { text = true, ntext = true, image = true, xml = true, geography = true, geometry = true },
-    -- MIN/MAX reject bit; compare it as a number instead.
-    cast_from = { bit = "INT" },
-  },
-}
-
 local function fetch_view_stats(table_name, url, session)
   local db_mod = require("dadbod-grip.db")
   local cols = session and session._column_info
@@ -181,8 +156,7 @@ local function fetch_view_stats(table_name, url, session)
   end
   if not cols or #cols == 0 then return nil, nil, "no columns found" end
 
-  local d = STATS_DIALECT[require("dadbod-grip.adapters").kind(db_mod.get_url(url) or "") or ""]
-    or STATS_DIALECT.default
+  local d = db_mod.stats_dialect(url)
   local tbl = {}
   for part in table_name:gmatch("[^.]+") do tbl[#tbl + 1] = d.quote(part) end
 
@@ -317,7 +291,9 @@ function M.switch_view(bufnr, view_name, opts)
     elseif session.query_sql then
       query_sql = session.query_sql
     else
-      query_sql = string.format('SELECT * FROM "%s" LIMIT 100', (table_name or ""):gsub('"', '""'))
+      -- Through the query builder, so each adapter gets its own row cap syntax.
+      local qmod = require("dadbod-grip.query")
+      query_sql = qmod.build_sql(qmod.new_table(table_name, 100))
     end
     -- Pass through nvim_cmd args: string form splits the argument on newlines
     -- (and on |), so a multi-line query pad SQL was executed as several

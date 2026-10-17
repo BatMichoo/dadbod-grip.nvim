@@ -8,6 +8,16 @@ local esc = sql_util.escape_literal
 
 local M = { readonly = true }
 
+-- Column-stats query rules; see db.stats_dialect.
+M.stats_dialect = {
+  quote = function(n) return "[" .. n:gsub("%]", "]]") .. "]" end,
+  text = "NVARCHAR(100)",
+  -- COUNT(DISTINCT), MIN and MAX all fail on these.
+  no_compare = { text = true, ntext = true, image = true, xml = true, geography = true, geometry = true },
+  -- MIN/MAX reject bit; compare it as a number instead.
+  cast_from = { bit = "INT" },
+}
+
 local DEFAULT_TIMEOUT = 30000
 
 --- go-sqlcmd answers --version; mssql-tools sqlcmd rejects it with exit 1.

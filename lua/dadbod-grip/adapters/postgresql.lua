@@ -9,6 +9,18 @@ local esc = sql_util.escape_literal
 
 local M = {}
 
+-- Column-stats query rules; see db.stats_dialect.
+M.stats_dialect = {
+  quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end,
+  text = "TEXT",
+  -- Geometric types have no equality, so not even COUNT(DISTINCT) works.
+  no_compare = { point = true, line = true, lseg = true, box = true, path = true, polygon = true, circle = true },
+  -- No min/max for these (json has no equality either). Enums, domains and
+  -- extension types report USER-DEFINED; text is the one cast all of them take.
+  cast_from = { uuid = "TEXT", boolean = "INT", json = "TEXT", jsonb = "TEXT", xml = "TEXT",
+    array = "TEXT", ["user-defined"] = "TEXT" },
+}
+
 local DEFAULT_TIMEOUT = 30000
 local SERVICE_NAME = "dadbod_grip"
 

@@ -9,6 +9,12 @@ local esc = sql_util.escape_literal
 
 local M = {}
 
+-- Column-stats query rules; see db.stats_dialect.
+M.stats_dialect = {
+  quote = function(n) return "`" .. n:gsub("`", "``") .. "`" end,
+  text = "CHAR",
+}
+
 local DEFAULT_TIMEOUT = 10000
 
 --- Split a possibly schema-qualified table name; callers pass the connected
