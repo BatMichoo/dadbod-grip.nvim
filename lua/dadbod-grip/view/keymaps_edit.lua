@@ -26,7 +26,7 @@ function M.setup(bufnr, ctx)
     local s_url = session_q and session_q.url
     local initial_sql
     if session_q and session_q.query_spec then
-      initial_sql = qmod.clean_sql(session_q.query_spec)
+      initial_sql = qmod.clean_sql(session_q.query_spec, require("dadbod-grip.db").kind(s_url))
     elseif session_q and session_q.query_sql then
       initial_sql = session_q.query_sql
     end

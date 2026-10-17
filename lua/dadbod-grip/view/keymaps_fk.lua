@@ -115,7 +115,7 @@ function M.setup(bufnr, ctx)
     local new_state = data.new(result)
     session_fk.query_spec = ref_spec
     view.render(bufnr, new_state)
-    view._sync_pad(ref_spec)
+    view._sync_pad(ref_spec, session_fk.url)
     vim.notify(tbl .. "." .. cell.col_name .. " → " .. fk_info.ref_table, vim.log.levels.INFO)
   end, "Follow FK to referenced row")
 
@@ -135,7 +135,7 @@ function M.setup(bufnr, ctx)
     local frame = table.remove(session_nav.nav_stack)
     session_nav.query_spec = frame.query_spec
     view.render(bufnr, frame.state)
-    view._sync_pad(frame.query_spec)
+    view._sync_pad(frame.query_spec, session_nav.url)
     -- Restore cursor
     if frame.cursor_pos then
       pcall(vim.api.nvim_win_set_cursor, 0, frame.cursor_pos)

@@ -306,7 +306,7 @@ test("reverse FK (gm) syncs the pad to the new table, scoped by the FK clause", 
   cleanup_grids()
   local pad = make_pad()
   grid_on_alices_orders()
-  eq(pad_text(pad), [[SELECT * FROM "orders" WHERE ("user_id" = '1')]],
+  eq(pad_text(pad), [[SELECT * FROM orders WHERE (user_id = '1')]],
     "the pad must describe the rows the grid is showing")
   cleanup_grids()
 end)
@@ -317,7 +317,7 @@ test("forward FK (gf) syncs the pad", function()
   local bufnr = open_grid("orders")
   cursor_to(bufnr, 1, "user_id")
   with_notify(function() feed(km.defaults.grid_fk_follow) end)
-  contains(pad_text(pad), [[SELECT * FROM "users" WHERE (]], "pad follows the jump")
+  contains(pad_text(pad), [[SELECT * FROM users WHERE (]], "pad follows the jump")
   cleanup_grids()
 end)
 
@@ -327,7 +327,7 @@ test("FK back (<C-o>) syncs the pad to the restored query", function()
   local bufnr = select(1, grid_on_alices_orders())
   with_notify(function() feed(km.defaults.grid_fk_back) end)
   eq(view._sessions[bufnr].state.table_name, "users", "precondition: popped back to users")
-  eq(pad_text(pad), 'SELECT * FROM "users"',
+  eq(pad_text(pad), 'SELECT * FROM users',
     "popping the nav stack must not leave the pad on the child table")
   cleanup_grids()
 end)
@@ -352,7 +352,7 @@ test("FK round trip out of a pad query leaves that query in the pad once", funct
 
   cursor_to(bufnr, 1, "user_id")
   with_notify(function() feed(km.defaults.grid_fk_follow) end)
-  contains(pad_text(pad), [[SELECT * FROM "users" WHERE (]], "jump appended the FK query")
+  contains(pad_text(pad), [[SELECT * FROM users WHERE (]], "jump appended the FK query")
 
   with_notify(function() feed(km.defaults.grid_fk_back) end)
   eq(pad_text(pad), user_sql,
@@ -366,7 +366,7 @@ test("pad sync does not clobber a query the user is composing", function()
   vim.api.nvim_buf_set_lines(pad, 0, -1, false, { "SELECT count(*) FROM orders" })
   grid_on_alices_orders()
   contains(pad_text(pad), "SELECT count(*) FROM orders", "user's query kept")
-  contains(pad_text(pad), [[SELECT * FROM "orders" WHERE ("user_id" = '1')]],
+  contains(pad_text(pad), [[SELECT * FROM orders WHERE (user_id = '1')]],
     "synced query appended below it")
   cleanup_grids()
 end)

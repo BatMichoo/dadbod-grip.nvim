@@ -305,7 +305,7 @@ function M.open(arg, url, opts)
   -- already there and we must not clobber the user's buffer.
   vim.schedule(function()
     if opts and opts.from_pad then return end
-    require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec))
+    require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec, db.kind(conn)))
   end)
 
   -- Store the query spec on the session

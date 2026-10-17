@@ -38,6 +38,11 @@ function M.resolved_url(url)
   return (require("dadbod-grip.connections").expand_url(url)) or url
 end
 
+--- Adapter kind ("postgresql", "sqlserver", ...) of a URL, templates resolved.
+function M.kind(url)
+  return adapters.kind(M.resolved_url(url))
+end
+
 --- Group flat referencing-FK rows into one entry per constraint.
 --- entries: { {table, column, ref_column, key}, ... } where key identifies the
 --- constraint (e.g. child_table + constraint_name). Rows sharing a key are a

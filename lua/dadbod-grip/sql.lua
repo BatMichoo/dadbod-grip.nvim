@@ -49,6 +49,39 @@ function M.quote_ident(name)
 end
 local quote_ident = M.quote_ident
 
+-- Words that need quoting as an identifier in at least one supported dialect.
+-- Not every reserved word: the ones a table or column is likely to be named.
+local RESERVED = {}
+for w in ([[
+  add all alter and any as asc authorization backup between by case check
+  column constraint create cross current current_date current_time
+  current_timestamp current_user database default delete desc distinct drop
+  else end except exec execute exists file for foreign from full function
+  grant group having in index inner insert intersect into is join key left
+  like limit merge natural not null of offset on or order outer percent
+  plan primary procedure read references right rows schema select
+  session_user set some table then to top transaction trigger union unique
+  update user using values view when where with
+]]):gmatch("%S+") do RESERVED[w] = true end
+
+--- Quote an identifier only where the name needs it, for SQL a person reads:
+--- dbo.Users stays bare, "Order Details" and "user" keep their quotes.
+--- Parts already quoted (a :Grip argument) are unquoted first. Postgres folds
+--- unquoted names to lower case, so there a name with capitals stays quoted.
+--- @param name string  possibly schema-qualified
+--- @param kind string|nil  adapter kind (adapters.kind); nil assumes Postgres rules
+function M.display_ident(name, kind)
+  local fold_case = kind == nil or kind == "postgresql"
+  local parts = {}
+  for part in tostring(M.unquote_ident(name)):gmatch("[^.]+") do
+    local bare = part:match("^[%a_][%w_]*$")
+      and not RESERVED[part:lower()]
+      and not (fold_case and part:find("%u"))
+    table.insert(parts, bare and part or quote_ident(part))
+  end
+  return table.concat(parts, ".")
+end
+
 -- Strip outer quotes from each part of a possibly schema-qualified identifier.
 -- Inverse of quote_ident: "public"."Participant" → public.Participant
 -- Handles double-quotes, backticks, and escaped internal quotes.

@@ -380,9 +380,9 @@ test("filter_summary: long clauses not truncated", function()
 end)
 
 -- ── clean_sql ────────────────────────────────────────────────────────────────
--- The pad-prefill SQL must quote the table name exactly like build_sql does, or
--- running the generated query fails on case-sensitive/reserved-word tables:
--- Postgres folds an unquoted `Organization` to `organization` (relation not found).
+-- The pad-prefill SQL quotes a name only where the dialect needs it. Without
+-- quotes the query must still run: Postgres folds an unquoted `Organization`
+-- to `organization` (relation not found), and `user` is a reserved word.
 
 test("clean_sql: table query quotes the identifier", function()
   local spec = query.new_table("Organization", 100)
@@ -391,7 +391,7 @@ end)
 
 test("clean_sql: quotes a schema-qualified table per part", function()
   local spec = query.new_table("public.Organization", 100)
-  eq(query.clean_sql(spec), 'SELECT * FROM "public"."Organization"')
+  eq(query.clean_sql(spec), 'SELECT * FROM public."Organization"')
 end)
 
 test("clean_sql: matches build_sql's FROM clause", function()
@@ -511,13 +511,13 @@ end)
 test("clean_sql: ANDs multiple pinned filters", function()
   local spec = query.add_filter(query.new_table("t", 100), "a = 1", { pinned = true })
   spec = query.add_filter(spec, "b = 2", { pinned = true })
-  eq(query.clean_sql(spec), 'SELECT * FROM "t" WHERE (a = 1) AND (b = 2)')
+  eq(query.clean_sql(spec), 'SELECT * FROM t WHERE (a = 1) AND (b = 2)')
 end)
 
 test("clean_sql: omits user filters, sorts and the cap", function()
   local spec = query.add_filter(query.new_table("t", 100), "name = 'x'")
   spec = query.toggle_sort(spec, "id")
-  eq(query.clean_sql(spec), 'SELECT * FROM "t"',
+  eq(query.clean_sql(spec), 'SELECT * FROM t',
     "the pad shows the query you opened, not transient view state")
 end)
 
@@ -527,11 +527,25 @@ test("clean_sql: raw spec returns base_sql even with a pinned filter", function(
     "raw specs are user-authored text: never rewritten")
 end)
 
-test("clean_sql: pinned output is runnable as-is (matches build_sql prefix)", function()
+test("clean_sql: unquotes a pinned clause's column, not its literal", function()
   local spec = query.add_filter(query.new_table("Organization", 100),
-    '"id" = 7', { pinned = true })
-  contains(query.build_sql(spec), query.clean_sql(spec),
-    "build_sql must extend exactly what the pad shows")
+    [["id" = '"x"']], { pinned = true })
+  eq(query.clean_sql(spec), [[SELECT * FROM "Organization" WHERE (id = '"x"')]])
+end)
+
+test("clean_sql: SQL Server drops quotes from mixed-case names", function()
+  local spec = query.add_filter(query.new_table('"dbo"."Users"', 100),
+    '"OrgId" = 7', { pinned = true })
+  eq(query.clean_sql(spec, "sqlserver"), "SELECT * FROM dbo.Users WHERE (OrgId = 7)")
+end)
+
+test("clean_sql: keeps quotes a name needs in every dialect", function()
+  eq(query.clean_sql(query.new_table("dbo.user", 100), "sqlserver"),
+    'SELECT * FROM dbo."user"', "reserved word")
+  eq(query.clean_sql(query.new_table("Order Details", 100), "sqlserver"),
+    'SELECT * FROM "Order Details"', "space in the name")
+  eq(query.clean_sql(query.new_table("public.Organization", 100), "postgresql"),
+    'SELECT * FROM public."Organization"', "Postgres folds capitals")
 end)
 
 test("immutability: add_filter with pinned does not mutate original", function()

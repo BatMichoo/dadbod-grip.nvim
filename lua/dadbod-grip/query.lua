@@ -331,21 +331,29 @@ end
 --- Return the user-visible SQL for a spec (no pagination wrapper).
 --- Use this to pre-fill the query pad. build_sql() is for DB execution only.
 --- For raw specs returns spec.base_sql; for table specs returns
---- 'SELECT * FROM "table"' plus the WHERE of any pinned filters. The identifier is
---- quoted the same way build_sql quotes it, so the prefilled query runs as-is
---- against case-sensitive or reserved-word tables (unquoted, Postgres folds
---- "Organization" → organization).
+--- 'SELECT * FROM table' plus the WHERE of any pinned filters. Identifiers are
+--- quoted only where `kind`'s dialect needs it (sql.display_ident): the query
+--- still runs as-is against reserved-word or, on Postgres, mixed-case tables.
 --- Pinned filters are included because they define which rows the grid is showing
 --- (FK navigation): without them the pad would advertise a query returning a
 --- different result set than the grid below it. User filters, sorts and pagination
 --- are excluded — those are transient view state, and rewriting the pad on every
 --- f/s/H keypress would clobber whatever the user is composing there.
-function M.clean_sql(spec)
+function M.clean_sql(spec, kind)
   if spec.is_raw then
     return spec.base_sql
   end
-  local out = "SELECT * FROM " .. sql_mod.quote_ident(spec.table_name or "")
-  local where = where_clause(pinned_filters(spec))
+  local out = "SELECT * FROM " .. sql_mod.display_ident(spec.table_name or "", kind)
+  -- Pinned clauses start with the column quote_ident wrote ("col" = 'v');
+  -- only that leading identifier is touched, never a string literal.
+  local pinned = {}
+  for _, f in ipairs(pinned_filters(spec)) do
+    local clause = f.clause:gsub('^("[^"]+")', function(id)
+      return sql_mod.display_ident(id, kind)
+    end)
+    table.insert(pinned, { clause = clause })
+  end
+  local where = where_clause(pinned)
   if where then out = out .. " " .. where end
   return out
 end

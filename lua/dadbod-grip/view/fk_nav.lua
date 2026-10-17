@@ -21,9 +21,10 @@ end
 --- otherwise the pad keeps advertising the table you started from, three FK hops
 --- ago. clean_sql() keeps this honest: the pinned FK clause is included (the pad
 --- describes the rows on screen) while sorts, user filters and pagination are not.
-function M._sync_pad(spec)
+function M._sync_pad(spec, url)
   if not spec then return end
-  require("dadbod-grip.query_pad").sync_query(qmod.clean_sql(spec))
+  local kind = require("dadbod-grip.db").kind(url)
+  require("dadbod-grip.query_pad").sync_query(qmod.clean_sql(spec, kind))
 end
 
 -- ── reverse FK navigation ─────────────────────────────────────────────────
@@ -163,7 +164,7 @@ function M._fk_referencing(bufnr)
     local new_state = data.new(result)
     session.query_spec = ref_spec
     view().render(bufnr, new_state)
-    view()._sync_pad(ref_spec)
+    view()._sync_pad(ref_spec, session.url)
     vim.notify(
       ref.table .. "." .. ref.column .. " ← " .. tbl ..
       " (" .. row_count .. (row_count == 1 and " row)" or " rows)"),
