@@ -649,6 +649,7 @@ function M.refresh(url)
   state.routines = nil
   state.file_cols = nil
   clear_metadata(state)
+  db.clear_key_cache(url)
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   if is_file_url(url) then

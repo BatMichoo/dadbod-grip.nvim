@@ -329,18 +329,58 @@ local function via_adapter(url, fn, ...)
   return a, b, c
 end
 
+-- ── primary key cache ─────────────────────────────────────────────────────
+-- Every grid load and refresh needs the table's primary key to allow edits.
+-- Keys rarely change, and each lookup is one more round-trip (a whole login
+-- for sqlcmd), so they are kept per connection until DDL runs through db.*
+-- or the sidebar is refreshed.
+
+local _pk_cache = {}  -- url → { [table_name] = pks }
+
+local function cache_key(url)
+  return M.get_url(url) or ""
+end
+
+--- Forget cached primary keys: one connection's, or all with no url.
+function M.clear_key_cache(url)
+  if url then _pk_cache[cache_key(url)] = nil else _pk_cache = {} end
+end
+
+local function cache_pks(url, table_name, pks)
+  local key = cache_key(url)
+  _pk_cache[key] = _pk_cache[key] or {}
+  _pk_cache[key][table_name] = vim.list_extend({}, pks)
+end
+
+--- Statements that can change a table's keys clear the connection's cache.
+--- A keyword inside a string literal also clears it: a wasted lookup, no harm.
+local function note_ddl(sql, url)
+  local upper = tostring(sql):upper()
+  for _, kw in ipairs({ "ALTER", "DROP", "CREATE", "RENAME", "SP_RENAME" }) do
+    if upper:find("%f[%w_]" .. kw .. "%f[^%w_]") then
+      M.clear_key_cache(url)
+      return
+    end
+  end
+end
+
 -- ── public interface (unchanged signatures) ───────────────────────────────
 
 function M.query(sql, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
+  note_ddl(sql, url)
   return via_adapter(url, adapter.query, sql, conn)
 end
 
 function M.get_primary_keys(table_name, url)
+  local cached = (_pk_cache[cache_key(url)] or {})[table_name]
+  if cached then return vim.list_extend({}, cached), nil end
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
-  return via_adapter(url, adapter.get_primary_keys, table_name, conn)
+  local pks, pk_err = via_adapter(url, adapter.get_primary_keys, table_name, conn)
+  if pks and not pk_err then cache_pks(url, table_name, pks) end
+  return pks, pk_err
 end
 
 --- Primary and foreign keys together: (pks, fks, err). One round-trip when
@@ -350,6 +390,7 @@ function M.get_table_keys(table_name, url)
   if not adapter then return {}, {}, err end
   if adapter.get_table_keys then
     local pks, fks, kerr = via_adapter(url, adapter.get_table_keys, table_name, conn)
+    if pks and not kerr then cache_pks(url, table_name, pks) end
     return pks or {}, fks or {}, kerr
   end
   local pks, pk_err = M.get_primary_keys(table_name, url)
@@ -366,6 +407,7 @@ end
 function M.execute(sql, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
+  note_ddl(sql, url)
   return via_adapter(url, adapter.execute, sql, conn)
 end
 
