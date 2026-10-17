@@ -245,6 +245,68 @@ test("apply_records: refresh on a metadata view reloads that view", function()
   if not ok then error(err) end
 end)
 
+-- ── column stats ─────────────────────────────────────────────────────────────
+
+--- Open a SQL Server grid on dbo.orders with db.query/get_column_info stubbed.
+local function with_stats_grid(query_fn, fn)
+  cleanup()
+  local db_mod = require("dadbod-grip.db")
+  local orig_q, orig_cols = db_mod.query, db_mod.get_column_info
+  db_mod.get_column_info = function()
+    return {
+      { column_name = "id", data_type = "int" },
+      { column_name = "active", data_type = "bit" },
+      { column_name = "doc", data_type = "xml" },
+    }
+  end
+  db_mod.query = query_fn
+  local orig_notify = vim.notify
+  local notes = {}
+  vim.notify = function(msg) notes[#notes + 1] = msg end
+  local ok, err = pcall(function()
+    local url = "sqlserver://u:p@host/app"
+    local st = data.new({ columns = { "id" }, rows = { { "1" } }, table_name = "dbo.orders", url = url })
+    local bufnr = view.open(st, url, "SELECT * FROM dbo.orders", {})
+    fn(bufnr, notes)
+  end)
+  vim.notify = orig_notify
+  db_mod.query, db_mod.get_column_info = orig_q, orig_cols
+  cleanup()
+  if not ok then error(err) end
+end
+
+test("stats: one T-SQL scan, skipping types the aggregates reject", function()
+  local sent = {}
+  with_stats_grid(function(q)
+    sent[#sent + 1] = q
+    return { columns = {}, rows = { { "10", "10", "9", "1", "10", "9", "2", "0", "1", "4", nil, nil, nil } } }
+  end, function(bufnr)
+    view.switch_view(bufnr, "stats")
+    eq(#sent, 1, "one query")
+    assert(sent[1]:find("FROM [dbo].[orders]", 1, true), "bracket-quoted schema.table: " .. sent[1])
+    assert(not sent[1]:find("UNION", 1, true), "no per-column UNION")
+    assert(not sent[1]:find("AS TEXT", 1, true), "no CAST AS TEXT on SQL Server")
+    assert(sent[1]:find("MIN(CAST([active] AS INT))", 1, true), "bit compared as int")
+    assert(not sent[1]:find("DISTINCT [doc]", 1, true), "xml not aggregated")
+    local session = view._sessions[bufnr]
+    eq(session.current_view, "stats", "on stats")
+    local rows = session._meta_state.rows
+    eq(rows[1][5], "9", "id distinct")
+    eq(rows[2][6], "0", "active min")
+    eq(rows[3][4], "60.0%", "doc nulls")
+    eq(rows[3][5], "-", "doc distinct skipped")
+  end)
+end)
+
+test("stats: a failed query warns and leaves the view unchanged", function()
+  with_stats_grid(function() return nil, "Invalid object name" end, function(bufnr, notes)
+    view.switch_view(bufnr, "stats")
+    local session = view._sessions[bufnr]
+    assert(session.current_view == nil or session.current_view == "records", "still on records")
+    assert(table.concat(notes, "\n"):find("Invalid object name", 1, true), "real error shown")
+  end)
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nview_spec: %d passed, %d failed", pass, fail))

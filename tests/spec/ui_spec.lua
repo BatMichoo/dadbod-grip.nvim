@@ -26,6 +26,11 @@ test("blocking: returns multiple values", function()
   eq(a, 1, "first"); eq(b, 2, "second"); eq(c, 3, "third")
 end)
 
+test("blocking: keeps values after a leading nil", function()
+  local a, b, c = ui.blocking("test", function() return nil, nil, "boom" end)
+  assert(a == nil and b == nil and c == "boom", "err after nils survives: " .. tostring(c))
+end)
+
 test("blocking: no extra windows after success", function()
   local before = win_count()
   ui.blocking("test", function() return "ok" end)

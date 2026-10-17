@@ -404,9 +404,15 @@ local _spinner = nil
 --- @param msg string
 --- @param fn  function  must be synchronous or use vim.wait() internally
 --- @return    any       all return values from fn() forwarded
+-- { ok, r1, r2, ... } with the count kept in `n`: `#` stops at the first nil,
+-- so a plain table would drop the err of a (nil, nil, err) return.
+local function pack(...)
+  return { n = select("#", ...), ... }
+end
+
 function M.blocking(msg, fn)
   -- table.pack/table.unpack are Lua 5.2+; LuaJIT is 5.1.
-  -- { pcall(fn) } => { ok, r1, r2, ... } or { false, errmsg }
+  -- pack(pcall(fn)) => { ok, r1, r2, ..., n = count } or { false, errmsg }
   -- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps
   -- working if Neovim ever moves to a 5.2+ VM, where bare `unpack` is gone.
   -- luacheck: ignore 143
@@ -417,11 +423,10 @@ function M.blocking(msg, fn)
   if _spinner then
     local outer_msg = _spinner.msg
     _spinner.msg = msg
-    local rets = { pcall(fn) }
-    local ok   = table.remove(rets, 1)
+    local rets = pack(pcall(fn))
     _spinner.msg = outer_msg
-    if not ok then error(rets[1], 2) end
-    return unpack_(rets)
+    if not rets[1] then error(rets[2], 2) end
+    return unpack_(rets, 2, rets.n)
   end
 
   local frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
@@ -466,8 +471,7 @@ function M.blocking(msg, fn)
     end
   end))
 
-  local rets = { pcall(fn) }
-  local ok   = table.remove(rets, 1)
+  local rets = pack(pcall(fn))
 
   timer:stop()
   timer:close()
@@ -485,8 +489,8 @@ function M.blocking(msg, fn)
   -- Flush the close to terminal so the float disappears before the next render.
   pcall(vim.cmd, "redraw")
 
-  if not ok then error(rets[1], 2) end
-  return unpack_(rets)
+  if not rets[1] then error(rets[2], 2) end
+  return unpack_(rets, 2, rets.n)
 end
 
 return M

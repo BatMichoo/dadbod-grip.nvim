@@ -2007,49 +2007,80 @@ local function fetch_view_constraints(table_name, url, session)
   return columns, rows, nil
 end
 
+-- Per-dialect pieces of the stats query: identifier quoting, the type MIN/MAX
+-- are cast to for display, and the column types the aggregates reject.
+local STATS_DIALECT = {
+  default = { quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end, text = "TEXT" },
+  mysql = { quote = function(n) return "`" .. n:gsub("`", "``") .. "`" end, text = "CHAR" },
+  sqlserver = {
+    quote = function(n) return "[" .. n:gsub("%]", "]]") .. "]" end,
+    text = "NVARCHAR(100)",
+    -- COUNT(DISTINCT), MIN and MAX all fail on these.
+    no_compare = { text = true, ntext = true, image = true, xml = true, geography = true, geometry = true },
+    -- MIN/MAX reject bit; compare it as a number instead.
+    as_int = { bit = true },
+  },
+}
+
 local function fetch_view_stats(table_name, url, session)
   local db_mod = require("dadbod-grip.db")
-  local cols, err = db_mod.get_column_info(table_name, url)
-  if err and not cols then return nil, nil, err end
+  local cols = session and session._column_info
+  if not cols then
+    local err
+    cols, err = db_mod.get_column_info(table_name, url)
+    if err and not cols then return nil, nil, err end
+    if session and cols then session._column_info = cols end
+  end
   if not cols or #cols == 0 then return nil, nil, "no columns found" end
 
-  -- Build a UNION ALL query: one row per column with aggregate stats
-  local safe_tbl = table_name:gsub('"', '""')
-  local parts = {}
-  for _, c in ipairs(cols) do
-    local safe_col = c.column_name:gsub('"', '""')
-    local quoted_col = '"' .. safe_col .. '"'
-    local quoted_name = esc(c.column_name)
-    parts[#parts + 1] = string.format(
-      "SELECT '%s' AS col_name, COUNT(*) AS total_rows, COUNT(%s) AS non_null,"
-      .. " COUNT(*) - COUNT(%s) AS null_count, COUNT(DISTINCT %s) AS distinct_count,"
-      .. " CAST(MIN(%s) AS TEXT) AS min_val, CAST(MAX(%s) AS TEXT) AS max_val"
-      .. " FROM \"%s\"",
-      quoted_name, quoted_col, quoted_col, quoted_col, quoted_col, quoted_col, safe_tbl
-    )
-  end
+  local d = STATS_DIALECT[require("dadbod-grip.adapters").kind(db_mod.get_url(url) or "") or ""]
+    or STATS_DIALECT.default
+  local tbl = {}
+  for part in table_name:gmatch("[^.]+") do tbl[#tbl + 1] = d.quote(part) end
 
-  local stats_sql = table.concat(parts, "\nUNION ALL\n")
+  -- One row, one scan: COUNT(*) once, then four aggregates per column. A
+  -- UNION ALL per column scanned the table once per column.
+  local select_list = { "COUNT(*)" }
+  for _, c in ipairs(cols) do
+    local q = d.quote(c.column_name)
+    local base = tostring(c.data_type or ""):lower():match("^[%a_ ]+") or ""
+    base = vim.trim(base)
+    select_list[#select_list + 1] = "COUNT(" .. q .. ")"
+    if d.no_compare and d.no_compare[base] then
+      select_list[#select_list + 1] = "NULL"
+      select_list[#select_list + 1] = "NULL"
+      select_list[#select_list + 1] = "NULL"
+    else
+      local v = (d.as_int and d.as_int[base]) and ("CAST(" .. q .. " AS INT)") or q
+      select_list[#select_list + 1] = "COUNT(DISTINCT " .. v .. ")"
+      select_list[#select_list + 1] = "CAST(MIN(" .. v .. ") AS " .. d.text .. ")"
+      select_list[#select_list + 1] = "CAST(MAX(" .. v .. ") AS " .. d.text .. ")"
+    end
+  end
+  local stats_sql = "SELECT " .. table.concat(select_list, ", ")
+    .. " FROM " .. table.concat(tbl, ".")
 
   local result, query_err = db_mod.query(stats_sql, url)
   if query_err then return nil, nil, "Stats query failed: " .. query_err end
-  if not result then return nil, nil, "no stats result" end
+  if not result or not result.rows or not result.rows[1] then return nil, nil, "no stats result" end
 
+  local r = result.rows[1]
+  local total = tonumber(r[1]) or 0
   local columns = { "column", "total", "non_null", "nulls", "distinct", "min", "max" }
   local rows = {}
-  for _, row in ipairs(result.rows) do
-    -- row: col_name, total_rows, non_null, null_count, distinct_count, min_val, max_val
-    local total = tonumber(row[2]) or 0
-    local nulls = tonumber(row[4]) or 0
-    local null_pct = total > 0 and string.format("%.1f%%", (nulls / total) * 100) or "-"
+  for i, c in ipairs(cols) do
+    local at = 1 + (i - 1) * 4
+    local non_null = tonumber(r[at + 1]) or 0
+    local nulls = total - non_null
+    local function cell(v) return (v == nil or v == "" or v == "NULL") and "-" or v end
     table.insert(rows, {
-      row[1] or "",               -- column
-      tostring(total),            -- total
-      tostring(row[3] or ""),     -- non_null
-      null_pct,                   -- nulls (pct)
-      tostring(row[5] or ""),     -- distinct
-      row[6] or "-",              -- min
-      row[7] or "-",              -- max
+      c.column_name or "",
+      tostring(total),
+      tostring(non_null),
+      total > 0 and string.format("%.1f%%", (nulls / total) * 100) or "-",
+      cell(r[at + 2]),
+      cell(r[at + 3]),
+      cell(r[at + 4]),
     })
   end
   return columns, rows, nil
@@ -2191,18 +2222,24 @@ function M.switch_view(bufnr, view_name, opts)
     "Loading " .. (VIEW_LABELS[view_name] or view_name) .. " for " .. table_name .. "...",
     function() return fetcher(table_name, url, session) end
   )
-  if err then
-    vim.notify("Grip " .. view_name .. ": " .. err, vim.log.levels.WARN)
+  if err or not columns then
+    vim.notify("Grip " .. view_name .. ": " .. (err or "no data returned"), vim.log.levels.WARN)
     return
   end
 
   -- Build meta state and render (render sets session.state = meta_state temporarily)
-  local meta_state = make_meta_state(table_name, columns, rows)
+  local meta_state = make_meta_state(table_name, columns, rows or {})
+  local prev_view, prev_meta = session.current_view, session._meta_state
   session.current_view = view_name
   session._meta_state = meta_state  -- preserved for CR navigation (session.state is restored below)
-  M.render(bufnr, meta_state)
+  local ok, render_err = pcall(M.render, bufnr, meta_state)
   -- Restore the canonical records state so keymaps like `r` still work
   session.state = session._records_state
+  if not ok then
+    -- Stay on the view that is still on screen, so pressing the key again retries.
+    session.current_view, session._meta_state = prev_view, prev_meta
+    error(render_err, 0)
+  end
 
   -- Update buffer name and restore cached cursor for this view
   update_buf_name(bufnr, table_name, view_name)
