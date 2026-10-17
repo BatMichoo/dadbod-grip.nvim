@@ -112,7 +112,7 @@ end
 --- Return the configured float border style.
 --- Lazy-requires init to avoid circular dependency.
 function M.border()
-  return require("dadbod-grip").get_opts().border
+  return require("dadbod-grip.config").values.border
 end
 
 local function report_height(line_count)

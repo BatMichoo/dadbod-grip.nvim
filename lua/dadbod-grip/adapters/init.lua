@@ -20,9 +20,7 @@ M._exit_grace_ms = 3000
 --- here makes all CLI adapters honor the same option without five copies of
 --- the configuration lookup.
 function M.configured_timeout(fallback)
-  local ok, grip = pcall(require, "dadbod-grip")
-  if not ok or type(grip.get_opts) ~= "function" then return fallback end
-  local value = grip.get_opts().timeout
+  local value = require("dadbod-grip.config").values.timeout
   return type(value) == "number" and value or fallback
 end
 

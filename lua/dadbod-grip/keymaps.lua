@@ -264,7 +264,7 @@ end
 ---@param action string
 ---@return string|false|nil
 function M.get(action)
-  local user = require("dadbod-grip")._keymaps
+  local user = require("dadbod-grip.config").keymaps
   if user and user[action] ~= nil then return user[action] end
   return M.defaults[action]
 end

@@ -133,7 +133,7 @@ function M.open(grid_bufnr)
   local lines, ft = M.render_value(cell.value, cell.col_name)
 
   -- Split: horizontal ~40% height (default) or vertical ~40% width
-  local split_style = require("dadbod-grip").get_opts().cell_split
+  local split_style = require("dadbod-grip.config").values.cell_split
   if split_style == "vertical" then
     vim.cmd("belowright vsplit")
     vim.api.nvim_win_set_width(0, math.max(20, math.floor(vim.o.columns * 0.4)))

@@ -1240,7 +1240,7 @@ function M._update_winbar(bufnr)
     table.insert(badges, { text = "✎ WRITE", hl = "ErrorMsg" })
   end
 
-  local sticky = require("dadbod-grip").get_opts().sticky_header ~= false
+  local sticky = require("dadbod-grip.config").values.sticky_header ~= false
   local view_state = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
   -- Buffer line 2 IS the column-name row. While it is still on screen the winbar
   -- would only show it a second time, so it goes blank instead of duplicating —

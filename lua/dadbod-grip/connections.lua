@@ -39,7 +39,7 @@ end
 local grip_dir = paths.grip_dir
 
 local function configured_connections_path()
-  local opts = require("dadbod-grip").get_opts()
+  local opts = require("dadbod-grip.config").values
   return opts.connections_path
 end
 
@@ -553,7 +553,7 @@ end
 --- discovery option is disabled, docker is unavailable, or the daemon is
 --- down. Never throws.
 local function read_discovered_connections()
-  local opts = require("dadbod-grip").get_opts()
+  local opts = require("dadbod-grip.config").values
   if opts.discovery == false then return {} end
   local ok, mod = pcall(require, "dadbod-grip.sources.docker_localdb")
   if not ok then return {} end
@@ -644,7 +644,7 @@ function M.list()
   -- setup({ databases }): config-defined, so like g:dbs its group wins, but
   -- never copied to the global file -- the config already lists them every
   -- session, and their URLs carry passwords.
-  for _, c in ipairs(M.from_databases(require("dadbod-grip").get_opts().databases)) do
+  for _, c in ipairs(M.from_databases(require("dadbod-grip.config").values.databases)) do
     if not seen[c.url] then
       seen[c.url] = true
       table.insert(all, c)
@@ -956,7 +956,7 @@ function M.switch(url, name, conn_type, opts)
       if opts and opts.write    then open_opts.write    = true       end
       if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
       local schema = require("dadbod-grip.schema")
-      local auto_sidebar = require("dadbod-grip").get_opts().open_sidebar
+      local auto_sidebar = require("dadbod-grip.config").values.open_sidebar
       -- Both round-trips under one preloader. open() runs a blocking() of its
       -- own for the grid query; nested, that relabels this float instead of
       -- closing it, so the screen stays covered until there is a grid to show.
@@ -1030,7 +1030,7 @@ function M.switch(url, name, conn_type, opts)
 
   vim.schedule(function()
     local schema = require("dadbod-grip.schema")
-    local auto_sidebar = require("dadbod-grip").get_opts().open_sidebar
+    local auto_sidebar = require("dadbod-grip.config").values.open_sidebar
 
     -- One preloader over the whole workspace. The table list is fetched here,
     -- before any of these windows exist, and the three panes are then built

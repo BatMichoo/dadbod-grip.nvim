@@ -17,7 +17,7 @@ function M.setup(bufnr, ctx)
     if not session then return end
     if not session.pinned then
       -- Check pinned_max cap before pinning
-      local limit = require("dadbod-grip").get_opts().pinned_max
+      local limit = require("dadbod-grip.config").values.pinned_max
       if limit then
         local count = 0
         ctx.each_session(function(_, s)

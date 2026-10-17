@@ -470,7 +470,7 @@ end
 --- (a) opts.actions is non-empty (complex pickers need built-in features),
 --- (b) the configured backend is not installed.
 function M.pick(opts)
-  local picker_type = require("dadbod-grip").get_opts().picker
+  local picker_type = require("dadbod-grip.config").values.picker
   if picker_type ~= "builtin" and not (opts.actions and #opts.actions > 0) then
     local mod = "dadbod-grip.pickers." .. picker_type
     local ok, backend = pcall(require, mod)

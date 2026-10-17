@@ -114,7 +114,7 @@ local function sqlcmd_args(parsed)
   -- which breaks long JSON cells. The sqlserver_max_type_width option raises
   -- that (0 = unlimited) via -y. go-sqlcmd allows -y next to -W; mssql-tools
   -- sqlcmd rejects the combination, so it keeps its default limit.
-  local max_type_width = require("dadbod-grip").get_opts().sqlserver_max_type_width
+  local max_type_width = require("dadbod-grip.config").values.sqlserver_max_type_width
   if max_type_width and is_go_sqlcmd() then
     args[#args + 1] = "-y"
     args[#args + 1] = tostring(max_type_width)
