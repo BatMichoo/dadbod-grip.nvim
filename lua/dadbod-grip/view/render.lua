@@ -47,6 +47,12 @@ local BOT_MID = "╧"
 local truncate_display = ui.truncate_display
 local pad_display = ui.pad_display
 
+--- One-line form of a cell value: a newline shows as ↵ and a tab as ⇥ (a raw
+--- tab's width depends on its column, which breaks the grid's alignment).
+local function one_line(v)
+  return (v:gsub("\r\n", "\n"):gsub("\n", "↵"):gsub("\r", ""):gsub("\t", "⇥"))
+end
+
 -- Returns two tables keyed by column name:
 --   widths  — display width clamped to max_width (what the grid actually renders)
 --   natural — true (unclamped) content width, used to cap slack expansion so a
@@ -66,7 +72,7 @@ local function calc_col_widths(columns, rows, max_width)
   local function scan_row(row_data)
     for i, col in ipairs(columns) do
       local v = row_data[i] or ""
-      local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
+      local display = (v == nil or v == "") and NULL_DISPLAY or one_line(tostring(v))
       local dw = vim.fn.strdisplaywidth(display)
       if dw > natural[col] then natural[col] = dw end
       widths[col] = math.min(math.max(widths[col], dw), max_width)
@@ -114,7 +120,7 @@ local function format_cell(value, width, is_null_staged)
     local s = pad_display(value, width, false)
     return s, "GripReadonly"
   end
-  local display = value ~= "" and value:gsub("\n", "↵"):gsub("\r", "") or NULL_DISPLAY
+  local display = value ~= "" and one_line(value) or NULL_DISPLAY
   local hl = value == "" and "GripNull" or nil
   return pad_display(display, width), hl
 end

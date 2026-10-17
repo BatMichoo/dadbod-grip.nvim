@@ -64,6 +64,25 @@ test("render: Korean cell content keeps table lines aligned", function()
   cleanup()
 end)
 
+test("render: tabs and newlines in values keep table lines aligned", function()
+  cleanup()
+  local st = data.new({
+    columns = { "id", "note" },
+    rows = { { "1", "a\tb\tc" }, { "2", "one\r\ntwo" }, { "3", "plain" } },
+    primary_keys = { "id" },
+    table_name = "notes",
+    url = "sqlite:x",
+  })
+  local bufnr = view.open(st, st.url, "SELECT * FROM notes", {})
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 7, false)
+  local expected = vim.fn.strdisplaywidth(lines[1])
+  for i = 2, 7 do
+    eq(vim.fn.strdisplaywidth(lines[i]), expected, "line " .. i .. " display width")
+    assert(not lines[i]:find("\t"), "raw tab in line " .. i)
+  end
+  cleanup()
+end)
+
 -- ── boolean detection (no type) ──────────────────────────────────────────────
 
 test("classify_cell: 'true' returns GripBoolTrue", function()
