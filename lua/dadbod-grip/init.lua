@@ -65,6 +65,18 @@ local function select_editable_table(...)
 end
 
 -- Decide the query spec for a given :Grip argument.
+--- `sql` without the comments before its first word ("" if only comments).
+local function strip_leading_comments(sql)
+  local body = sql
+  while true do
+    local rest = body:match("^%s*%-%-[^\n]*\n(.*)$") or body:match("^%s*/%*.-%*/(.*)$")
+    if not rest then break end
+    body = rest
+  end
+  if body:match("^%s*%-%-") then return "" end
+  return body
+end
+
 -- Returns (spec, table_name, file_path) or (nil, err_string).
 local function resolve_query(arg, limit, adapter_kind)
   if not arg or arg == "" then
@@ -94,13 +106,7 @@ local function resolve_query(arg, limit, adapter_kind)
   end
 
   -- Detect statement type from the first word after any leading comments
-  local body = arg
-  while true do
-    local rest = body:match("^%s*%-%-[^\n]*\n(.*)$") or body:match("^%s*/%*.-%*/(.*)$")
-    if not rest then break end
-    body = rest
-  end
-  if body:match("^%s*%-%-") then body = "" end
+  local body = strip_leading_comments(arg)
   local upper = body:upper():match("^%s*(%u+)")
   if upper == "SELECT" or upper == "TABLE" then
     local table_name = nil
@@ -155,12 +161,168 @@ function M._mutation_preview(...) return actions._mutation_preview(...) end
 function M._next_edit_cursor(...) return actions._next_edit_cursor(...) end
 
 -- ── open ──────────────────────────────────────────────────────────────────
+
+--- Run a statement that changes data or schema instead of returning rows.
+--- UPDATE/DELETE/INSERT (also alone inside BEGIN ... COMMIT) get a preview
+--- grid; anything else (DDL) is confirmed, executed, and the visible grids
+--- refreshed.
+local function run_statement(mutation_sql, conn, opts)
+  local stmt_type = strip_leading_comments(mutation_sql):upper():match("^%s*(%u+)") or "SQL"
+
+  -- Unwrap BEGIN/COMMIT (or START TRANSACTION) blocks: extract inner DML for mutation preview.
+  -- Executing just the inner statement is correct: BEGIN/COMMIT is unnecessary for single stmts.
+  if stmt_type == "BEGIN" or stmt_type == "START" then
+    local inner = strip_leading_comments(mutation_sql)
+      :gsub("^%s*START%s+TRANSACTION%s*;%s*\n?", "")
+      :gsub("^%s*BEGIN%s*;%s*\n?", "")
+      :gsub("\n?%s*COMMIT%s*;?%s*$", "")
+      :gsub("\n?%s*ROLLBACK%s*;?%s*$", "")
+    inner = inner:match("^%s*(.-)%s*$")
+    if inner and inner ~= "" then
+      local inner_type = inner:upper():match("^%s*(%u+)")
+      if inner_type == "UPDATE" or inner_type == "DELETE" or inner_type == "INSERT"
+          or inner_type == "REPLACE" then
+        local preview_type = inner_type == "REPLACE" and "INSERT" or inner_type
+        M._mutation_preview(inner, conn, preview_type, opts)
+        return
+      end
+    end
+    -- No DML inside: fall through to DDL confirm
+  end
+
+  -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
+  if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT"
+      or stmt_type == "REPLACE" then
+    -- Treat REPLACE as INSERT for preview purposes
+    local preview_type = (stmt_type == "REPLACE") and "INSERT" or stmt_type
+    M._mutation_preview(mutation_sql, conn, preview_type, opts)
+    return
+  end
+
+  -- For DDL (ALTER/DROP/CREATE/etc.): confirm then execute
+  local label = ("Execute " .. stmt_type .. "?")
+  local choice = vim.fn.confirm(label .. "\n\n" .. mutation_sql:sub(1, 200), "&Execute\n&Cancel", 2)
+  if choice ~= 1 then return end
+
+  local t0 = vim.uv.hrtime()
+  local _, exec_err = db.execute(mutation_sql, conn)
+  local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
+  if exec_err then
+    vim.notify("Grip: " .. exec_err, vim.log.levels.ERROR)
+  else
+    vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
+    local history = require("dadbod-grip.history")
+    history.record({ sql = mutation_sql, url = conn, type = stmt_type:lower(), elapsed_ms = ms })
+    -- Refresh the grids the user can actually see. Iterating _sessions and
+    -- breaking on the first hit picked an arbitrary grid (pairs order), which
+    -- could leave the visible one stale while refreshing a hidden buffer.
+    for _, wid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local bufnr_r = vim.api.nvim_win_get_buf(wid)
+      local session_r = view._sessions[bufnr_r]
+      if session_r and session_r.on_refresh then session_r.on_refresh(bufnr_r) end
+    end
+  end
+end
+
+--- Put the cursor on the first cell of the row an insert or clone just added.
+local function cursor_to_new_row(session, new_state)
+  local r = session._render
+  if not r then return end
+  for i, idx in ipairs(r.ordered) do
+    if new_state.inserted[idx] and idx == new_state._next_insert_idx - 1 then
+      local line_nr = i + (r.data_start or 4) - 1
+      local bp_row = r.byte_positions and r.byte_positions[i]
+      local first_col = new_state.columns[1]
+      local col_byte = bp_row and bp_row[first_col] and bp_row[first_col].start or #("║ ")
+      pcall(vim.api.nvim_win_set_cursor, 0, { line_nr, col_byte })
+      return
+    end
+  end
+end
+
+--- The callbacks a grid calls back into for refresh, requery and edits.
+local function grid_callbacks(conn, table_name_arg, query_sql)
+  return {
+      on_refresh = function(bid)
+        local s = view._sessions[bid]
+        if not s then return end
+        -- Read current table name from session state (may have been updated by rename)
+        local current_table = (s.state and s.state.table_name) or table_name_arg
+        local sql_str = s.query_spec and query.build_sql(s.query_spec) or query_sql
+        do_refresh(bid, conn, sql_str, current_table)
+      end,
+      on_requery = function(bid, new_spec)
+        local s = view._sessions[bid]
+        if not s then return end
+
+        -- Sort and filter changes rerun the query, and nothing else
+        local new_sql, fetched_q
+        ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
+          new_sql = query.build_sql(new_spec)
+          fetched_q = fetch_refresh(conn, new_sql, table_name_arg)
+        end)
+
+        s.query_spec = new_spec
+        s.query_sql = new_sql
+        apply_refresh(bid, fetched_q)
+      end,
+      on_apply = function(bid)
+        do_apply(bid, conn)
+      end,
+      on_edit = function(bid, cell)
+        do_edit(bid, cell, conn)
+      end,
+      on_delete = function(bid, row_idx)
+        local session_d = view._sessions[bid]
+        if not session_d then return end
+        if session_d.state.inserted[row_idx] then
+          -- Unsaved inserted row: remove it entirely
+          local new_state = data.undo_row(session_d.state, row_idx)
+          view.apply_edit(bid, new_state)
+          vim.notify("Removed unsaved row", vim.log.levels.INFO)
+        else
+          -- Existing DB row: toggle delete mark
+          local was_deleted = session_d.state.deleted[row_idx]
+          local new_state = data.toggle_delete(session_d.state, row_idx)
+          vim.notify(was_deleted and "Unmarked" or "Marked for deletion", vim.log.levels.INFO)
+          view.apply_edit(bid, new_state)
+        end
+      end,
+      on_insert = function(bid, after_idx)
+        local session_i = view._sessions[bid]
+        if not session_i then return end
+        local new_state = data.insert_row(session_i.state, after_idx)
+        view.apply_edit(bid, new_state)
+        vim.notify("Inserted blank row", vim.log.levels.INFO)
+        cursor_to_new_row(session_i, new_state)
+      end,
+      on_clone = function(bid, row_idx)
+        local session_c = view._sessions[bid]
+        if not session_c then return end
+        local new_state = data.clone_row(session_c.state, row_idx)
+        view.apply_edit(bid, new_state)
+        vim.notify("Cloned row (edit PKs then gw to commit)", vim.log.levels.INFO)
+        cursor_to_new_row(session_c, new_state)
+      end,
+  }
+end
+
+--- The connection a file-as-table query runs on: the active DuckDB session,
+--- so ATTACHed databases remain accessible, else an in-memory DuckDB.
+--- The scheme test needs the resolved URL (a whole-URL template hides it), but
+--- the template is what is returned: everything downstream expands it via
+--- db.resolve(), and history/view must not record the expansion.
+local function file_connection()
+  local active = vim.g.db
+  local resolved = db.resolved_url(active)
+  return (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
+end
+
 ---Open a table or raw SQL query in a grip grid.
 ---@param arg string  Table name or SQL query
 ---@param url? string Connection URL (uses active connection if nil)
----@param opts? table Additional options (write, watch_ms)
+---@param opts? table Additional options (write, watch_ms, view, metadata_view, from_pad, reuse_win)
 function M.open(arg, url, opts)
-  -- Resolve connection URL
   local conn = url
   if not conn or conn == "" then
     conn = vim.b.db
@@ -173,92 +335,27 @@ function M.open(arg, url, opts)
   local adapter_kind = adapters.kind(db.resolved_url(conn))
   local spec, table_name_arg, file_path, mutation_sql = resolve_query(arg, OPTS.limit, adapter_kind)
 
-  -- Handle destructive statements (UPDATE/DELETE/INSERT/DDL)
   if mutation_sql then
-    local exec_conn = url or conn or vim.b.db or vim.g.db
-    if not exec_conn or exec_conn == "" then
+    if not conn or conn == "" then
       vim.notify("Grip: no database connection", vim.log.levels.WARN)
       return
     end
-    local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
-
-    -- Unwrap BEGIN/COMMIT (or START TRANSACTION) blocks: extract inner DML for mutation preview.
-    -- Executing just the inner statement is correct: BEGIN/COMMIT is unnecessary for single stmts.
-    if stmt_type == "BEGIN" or stmt_type == "START" then
-      local inner = mutation_sql
-        :gsub("^%s*START%s+TRANSACTION%s*;%s*\n?", "")
-        :gsub("^%s*BEGIN%s*;%s*\n?", "")
-        :gsub("\n?%s*COMMIT%s*;?%s*$", "")
-        :gsub("\n?%s*ROLLBACK%s*;?%s*$", "")
-      inner = inner:match("^%s*(.-)%s*$")
-      if inner and inner ~= "" then
-        local inner_type = inner:upper():match("^%s*(%u+)")
-        if inner_type == "UPDATE" or inner_type == "DELETE" or inner_type == "INSERT"
-            or inner_type == "REPLACE" then
-          local preview_type = inner_type == "REPLACE" and "INSERT" or inner_type
-          M._mutation_preview(inner, exec_conn, preview_type, opts)
-          return
-        end
-      end
-      -- No DML inside: fall through to DDL confirm
-    end
-
-    -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
-    if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT"
-        or stmt_type == "REPLACE" then
-      -- Treat REPLACE as INSERT for preview purposes
-      local preview_type = (stmt_type == "REPLACE") and "INSERT" or stmt_type
-      M._mutation_preview(mutation_sql, exec_conn, preview_type, opts)
-      return
-    end
-
-    -- For DDL (ALTER/DROP/CREATE/etc.): confirm then execute
-    local label = ("Execute " .. stmt_type .. "?")
-    local choice = vim.fn.confirm(label .. "\n\n" .. mutation_sql:sub(1, 200), "&Execute\n&Cancel", 2)
-    if choice ~= 1 then return end
-
-    local t0 = vim.uv.hrtime()
-    local _, exec_err = db.execute(mutation_sql, exec_conn)
-    local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
-    if exec_err then
-      vim.notify("Grip: " .. exec_err, vim.log.levels.ERROR)
-    else
-      vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
-      local history = require("dadbod-grip.history")
-      history.record({ sql = mutation_sql, url = exec_conn, type = stmt_type:lower(), elapsed_ms = ms })
-      -- Refresh the grids the user can actually see. Iterating _sessions and
-      -- breaking on the first hit picked an arbitrary grid (pairs order), which
-      -- could leave the visible one stale while refreshing a hidden buffer.
-      for _, wid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        local bufnr_r = vim.api.nvim_win_get_buf(wid)
-        local session_r = view._sessions[bufnr_r]
-        if session_r and session_r.on_refresh then session_r.on_refresh(bufnr_r) end
-      end
-    end
+    run_statement(mutation_sql, conn, opts)
     return
   end
-
   if not spec then
     vim.notify("Grip: " .. (table_name_arg or "unknown error"), vim.log.levels.WARN)
     return
   end
 
-  -- File-as-table: use the active DuckDB connection so ATTACHed databases
-  -- remain accessible. Fall back to duckdb::memory: when no DuckDB session exists.
   if file_path then
-    -- The scheme test needs the resolved URL (a whole-URL template hides it),
-    -- but `conn` stays the template: everything downstream of here expands via
-    -- db.resolve(), and history/view must not record the expansion.
-    local active = vim.g.db
-    local resolved = db.resolved_url(active)
-    conn = (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
+    conn = file_connection()
     if opts and opts.write and not filetypes.write_format(file_path) then
       vim.notify("Write mode does not support this file format; opened read-only",
         vim.log.levels.WARN)
       opts = vim.tbl_extend("force", {}, opts, { write = false })
     end
   end
-
   if not conn or conn == "" then
     vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
     return
@@ -266,11 +363,6 @@ function M.open(arg, url, opts)
 
   local query_sql = query.build_sql(spec)
 
-  -- Run query with loading indicator + timing
-  local short_label = file_path and vim.fn.fnamemodify(file_path, ":t")
-      or table_name_arg and (table_name_arg:match("[^.]+$") or table_name_arg)
-      or "result"
-  short_label = (short_label:match("^([^\n]+)") or "query"):sub(1, 50)
   -- Opening a table is the SELECT (plus the primary keys, for editing) and
   -- nothing else: no COUNT(*) and no column-type lookup, each of which is one
   -- more round-trip -- a whole login, for sqlcmd.
@@ -286,7 +378,9 @@ function M.open(arg, url, opts)
       table_name = table_name_arg, url = conn, sql = query_sql,
     } }
   else
-    ui.blocking("  querying " .. short_label .. "...", function()
+    local label = file_path and vim.fn.fnamemodify(file_path, ":t"):sub(1, 50)
+      or spinner_label(table_name_arg)
+    ui.blocking("  querying " .. label .. "...", function()
       fetched = fetch_refresh(conn, query_sql, table_name_arg)
     end)
   end
@@ -300,13 +394,11 @@ function M.open(arg, url, opts)
   result.elapsed_ms = elapsed_ms
 
   if not records_pending then
-    local history = require("dadbod-grip.history")
-    history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query", elapsed_ms = elapsed_ms })
+    require("dadbod-grip.history").record({
+      sql = query_sql, url = conn, table_name = table_name_arg, type = "query", elapsed_ms = elapsed_ms,
+    })
   end
 
-  local state = data.new(result)
-
-  -- Open the view
   -- query_spec goes in up front so the first render already draws the row cap
   -- hint; without it the grid had to be rendered a second time.
   local view_opts = vim.tbl_extend("force", {
@@ -314,19 +406,16 @@ function M.open(arg, url, opts)
     elapsed_ms    = elapsed_ms,
     query_spec    = spec,
   }, opts or {})
-  local bufnr = view.open(state, conn, query_sql, view_opts)
+  local bufnr = view.open(data.new(result), conn, query_sql, view_opts)
 
-  -- Auto-sync query pad with the current grid query (passive background update).
-  -- Use the clean original SQL (base_sql or table name) so the pad shows what the
-  -- user wrote, not the internal sort/filter wrapper (SELECT * FROM (...) AS _grip ...).
-  -- Skip when the query originated from the pad itself (from_pad=true): the SQL is
-  -- already there and we must not clobber the user's buffer.
+  -- Show the opened query in the pad: the clean SQL (table name or the query as
+  -- written), not the internal sort/filter wrapper. Not for a query that came
+  -- from the pad (it is already there) or a grid whose rows are not loaded yet.
   vim.schedule(function()
     if (opts and opts.from_pad) or records_pending then return end
     require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec, db.kind(conn)))
   end)
 
-  -- Store the query spec on the session
   local session = view._sessions[bufnr]
   if session then
     session.records_pending = records_pending or nil
@@ -337,100 +426,10 @@ function M.open(arg, url, opts)
     session.query_spec = spec
   end
 
-  -- Wire callbacks
-  view.set_callbacks(bufnr, {
-    on_refresh = function(bid)
-      local s = view._sessions[bid]
-      if not s then return end
-      -- Read current table name from session state (may have been updated by rename)
-      local current_table = (s.state and s.state.table_name) or table_name_arg
-      local sql_str = s.query_spec and query.build_sql(s.query_spec) or query_sql
-      do_refresh(bid, conn, sql_str, current_table)
-    end,
-    on_requery = function(bid, new_spec)
-      local s = view._sessions[bid]
-      if not s then return end
-
-      -- Sort and filter changes rerun the query, and nothing else
-      local new_sql, fetched_q
-      ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
-        new_sql = query.build_sql(new_spec)
-        fetched_q = fetch_refresh(conn, new_sql, table_name_arg)
-      end)
-
-      s.query_spec = new_spec
-      s.query_sql = new_sql
-      apply_refresh(bid, fetched_q)
-    end,
-    on_apply = function(bid)
-      do_apply(bid, conn)
-    end,
-    on_edit = function(bid, cell)
-      do_edit(bid, cell, conn)
-    end,
-    on_delete = function(bid, row_idx)
-      local session_d = view._sessions[bid]
-      if not session_d then return end
-      if session_d.state.inserted[row_idx] then
-        -- Unsaved inserted row: remove it entirely
-        local new_state = data.undo_row(session_d.state, row_idx)
-        view.apply_edit(bid, new_state)
-        vim.notify("Removed unsaved row", vim.log.levels.INFO)
-      else
-        -- Existing DB row: toggle delete mark
-        local was_deleted = session_d.state.deleted[row_idx]
-        local new_state = data.toggle_delete(session_d.state, row_idx)
-        vim.notify(was_deleted and "Unmarked" or "Marked for deletion", vim.log.levels.INFO)
-        view.apply_edit(bid, new_state)
-      end
-    end,
-    on_insert = function(bid, after_idx)
-      local session_i = view._sessions[bid]
-      if not session_i then return end
-      local new_state = data.insert_row(session_i.state, after_idx)
-      view.apply_edit(bid, new_state)
-      vim.notify("Inserted blank row", vim.log.levels.INFO)
-      -- Move cursor to first cell of the new row
-      local r = session_i._render
-      if r then
-        local ordered = r.ordered
-        for i, idx in ipairs(ordered) do
-          if new_state.inserted[idx] and idx == new_state._next_insert_idx - 1 then
-            local line_nr = i + (r.data_start or 4) - 1
-            local bp_row = r.byte_positions and r.byte_positions[i]
-            local col_byte = bp_row and bp_row[new_state.columns[1]] and bp_row[new_state.columns[1]].start or #("║ ")
-            pcall(vim.api.nvim_win_set_cursor, 0, { line_nr, col_byte })
-            break
-          end
-        end
-      end
-    end,
-    on_clone = function(bid, row_idx)
-      local session_c = view._sessions[bid]
-      if not session_c then return end
-      local new_state = data.clone_row(session_c.state, row_idx)
-      view.apply_edit(bid, new_state)
-      vim.notify("Cloned row (edit PKs then gw to commit)", vim.log.levels.INFO)
-      -- Move cursor to first cell of the cloned row
-      local r = session_c._render
-      if r then
-        for i, idx in ipairs(r.ordered) do
-          if new_state.inserted[idx] and idx == new_state._next_insert_idx - 1 then
-            local line_nr = i + (r.data_start or 4) - 1
-            local bp_row = r.byte_positions and r.byte_positions[i]
-            local first_col = new_state.columns[1]
-            local col_byte = bp_row and bp_row[first_col] and bp_row[first_col].start or #("║ ")
-            pcall(vim.api.nvim_win_set_cursor, 0, { line_nr, col_byte })
-            break
-          end
-        end
-      end
-    end,
-  })
+  view.set_callbacks(bufnr, grid_callbacks(conn, table_name_arg, query_sql))
 
   if records_pending then
     view.switch_view(bufnr, opts.metadata_view)
-  -- Switch to a specific view if requested via opts.view (view name string)
   elseif opts and type(opts.view) == "string" then
     local view_name = opts.view
     vim.schedule(function()

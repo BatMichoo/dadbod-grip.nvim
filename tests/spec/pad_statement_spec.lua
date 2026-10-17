@@ -41,6 +41,16 @@ test("other statements run as written, not as a table name", function()
   assert(ran(q) == q, "got " .. tostring(ran(q)))
 end)
 
+test("a comment before UPDATE still gets the mutation preview", function()
+  local previewed
+  local real = grip._mutation_preview
+  grip._mutation_preview = function(sql, _, kind) previewed = { sql, kind } end
+  local ok, err = pcall(grip.open, "-- fix typo\nUPDATE users SET name = 'x' WHERE id = 1", url, { from_pad = true })
+  grip._mutation_preview = real
+  assert(ok, err)
+  assert(previewed and previewed[2] == "UPDATE", "no UPDATE preview: " .. vim.inspect(previewed))
+end)
+
 test("a bare name still opens the table", function()
   local sql = ran("users")
   assert(sql and sql:match('^SELECT %* FROM "users"'), "got " .. tostring(sql))
