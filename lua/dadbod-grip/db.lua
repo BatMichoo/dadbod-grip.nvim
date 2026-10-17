@@ -440,6 +440,19 @@ end
 --- duckdb) are preferred; otherwise falls back to scanning every table's
 --- forward FKs via list_tables + get_foreign_keys (composite FKs are not
 --- detectable in the fallback: entries stay per-column).
+--- Outbound and inbound FKs together: (fks, refs, err). One round-trip when
+--- the adapter can answer both in one query, two otherwise.
+function M.get_all_foreign_keys(table_name, url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil, {}, err end
+  if adapter.get_all_foreign_keys then
+    return via_adapter(url, adapter.get_all_foreign_keys, table_name, conn)
+  end
+  local fks, fk_err = M.get_foreign_keys(table_name, url)
+  if fk_err and not fks then return nil, {}, fk_err end
+  return fks, M.get_referencing_foreign_keys(table_name, url) or {}, nil
+end
+
 function M.get_referencing_foreign_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end

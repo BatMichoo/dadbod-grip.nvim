@@ -98,5 +98,34 @@ test("plain queries pass through", function()
   eq(wrap("SELECT * FROM t"), "SELECT * FROM t")
 end)
 
+test("get_all_foreign_keys: both directions from one sqlcmd run", function()
+  local adapters = require("dadbod-grip.adapters")
+  local real_run, real_exec = adapters.run_cmd, vim.fn.executable
+  local runs, stdin = 0, nil
+  adapters.run_cmd = function(_, _, opts)
+    runs = runs + 1
+    stdin = opts.stdin
+    return table.concat({
+      "dir\tcol\tother_table\tother_col\tfk_name\tpos",
+      "---\t---\t-----------\t---------\t-------\t---",
+      "OUT\torg_id\torgs\tid\tFK_u_org\t1",
+      "IN\tuser_id\tsales.orders\tid\tFK_o_u\t1",
+      "IN\tuser_id\tnotes\tid\tFK_n_u\t1",
+    }, "\n") .. "\n", "", 0
+  end
+  vim.fn.executable = function() return 1 end
+  local ok, err = pcall(function()
+    local fks, refs = ss.get_all_foreign_keys("dbo.users", "sqlserver://h/db")
+    eq(runs, 1, "one sqlcmd run")
+    eq(fks, { { column = "org_id", ref_table = "orgs", ref_column = "id" } }, "outbound")
+    eq(#refs, 2, "inbound count")
+    eq(refs[1].table, "sales.orders", "inbound table")
+    assert(stdin:find("ps.name = 'dbo' AND pt.name = 'users'", 1, true), "outbound filter")
+    assert(stdin:find("rs.name = 'dbo' AND rt.name = 'users'", 1, true), "inbound filter")
+  end)
+  adapters.run_cmd, vim.fn.executable = real_run, real_exec
+  assert(ok, err)
+end)
+
 print(string.format("\nsqlserver_parse_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

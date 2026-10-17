@@ -497,6 +497,48 @@ function M.list_tables(url)
   return out, nil
 end
 
+--- Both FK directions in one sqlcmd run, for the Foreign Keys view: each
+--- run is a separate login. Returns (outbound fks, inbound refs, err) in the
+--- shapes get_foreign_keys and get_referencing_foreign_keys return.
+function M.get_all_foreign_keys(table_name, url)
+  local schema, tbl = split_table_name(table_name, "dbo")
+  local name = function(s, t)
+    return string.format("CASE WHEN %s.name = 'dbo' THEN %s.name ELSE %s.name + '.' + %s.name END", s, t, s, t)
+  end
+  local body = [[
+    FROM sys.foreign_keys fk
+    JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+    JOIN sys.tables pt ON pt.object_id = fk.parent_object_id
+    JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+    JOIN sys.tables rt ON rt.object_id = fk.referenced_object_id
+    JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+    JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+    JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id]]
+  local sql_str = string.format([[
+    SELECT 'OUT' AS dir, pc.name AS col, %s AS other_table, rc.name AS other_col,
+      fk.name AS fk_name, fkc.constraint_column_id AS pos
+%s
+    WHERE ps.name = '%s' AND pt.name = '%s'
+    UNION ALL
+    SELECT 'IN', pc.name, %s, rc.name, fk.name, fkc.constraint_column_id
+%s
+    WHERE rs.name = '%s' AND rt.name = '%s'
+    ORDER BY dir DESC, other_table, fk_name, pos
+  ]], name("rs", "rt"), body, esc(schema), esc(tbl), name("ps", "pt"), body, esc(schema), esc(tbl))
+
+  local result, err = run_query(sql_str, url)
+  if not result then return {}, {}, err end
+  local fks, inbound = {}, {}
+  for _, row in ipairs(result.rows) do
+    if row[1] == "OUT" then
+      table.insert(fks, { column = row[2] or "", ref_table = row[3] or "", ref_column = row[4] or "" })
+    elseif row[1] == "IN" then
+      table.insert(inbound, { table = row[3] or "", column = row[2] or "", ref_column = row[4] or "", key = row[5] or "" })
+    end
+  end
+  return fks, db_util.group_referencing_fks(inbound), nil
+end
+
 --- Reverse FK lookup: which tables reference table_name?
 --- One schema-aware sys.foreign_keys query, so a qualified target
 --- ("dbo.users") is resolved server-side instead of going through db.lua's

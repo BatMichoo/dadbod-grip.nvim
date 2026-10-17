@@ -83,20 +83,17 @@ end
 
 local function fetch_view_fk(table_name, url, session)
   local db_mod = require("dadbod-grip.db")
-  local fks, err = db_mod.get_foreign_keys(table_name, url)
-  if err and not fks then return nil, nil, err end
-  fks = fks or {}
+  local fks, refs, err = db_mod.get_all_foreign_keys(table_name, url)
+  if err and (not fks or #fks == 0) and #(refs or {}) == 0 then return nil, nil, err end
+  fks, refs = fks or {}, refs or {}
   local columns = { "direction", "column", "ref_table", "ref_column" }
   local rows = {}
   -- Outbound: columns in this table pointing to other tables
   for _, fk in ipairs(fks) do
     table.insert(rows, { "→ outbound", fk.column or "", fk.ref_table or "", fk.ref_column or "" })
   end
-  -- Inbound: other tables that reference this table. get_referencing_foreign_keys
-  -- answers this in one query on every adapter that supports it (and falls back
-  -- to the same list_tables + per-table scan otherwise), instead of spawning one
-  -- CLI process per table in the schema. Same source as the gr keymap.
-  local refs = db_mod.get_referencing_foreign_keys(table_name, url) or {}
+  -- Inbound: other tables that reference this table, from the same call
+  -- (get_all_foreign_keys; same source as the gr keymap).
   for _, ref in ipairs(refs) do
     -- Self-references are already listed above as outbound; don't repeat them.
     if ref.table ~= table_name then
