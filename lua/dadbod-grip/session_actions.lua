@@ -326,7 +326,7 @@ local function fetch_refresh(url, query_sql, table_name)
   end
 
   -- Re-fetch primary keys
-  result.readonly = db.is_readonly(url)
+  result.readonly, result.readonly_reason = db.is_readonly(url)
   if table_name and not result.readonly then
     local pks, pk_err = db.get_primary_keys(table_name, url)
     result.primary_keys = (pk_err == nil) and pks or {}

@@ -526,10 +526,17 @@ end
 --- `url` is passed through as given -- the stored, possibly templated form --
 --- because that is the key connection entries live under; see
 --- connections.current_mode.
+--- Second value: why, for the grid's read-only message.
 function M.is_readonly(url)
   local adapter = resolve(url)
-  if adapter and adapter.readonly == true then return true end
-  return require("dadbod-grip.connections").current_mode(url) == "ro"
+  if adapter and adapter.readonly == true then
+    local name = adapters.display_name(M.resolved_url(M.get_url(url))) or "this database"
+    return true, "Grip cannot edit " .. name .. " tables yet"
+  end
+  if require("dadbod-grip.connections").current_mode(url) == "ro" then
+    return true, "read-only connection"
+  end
+  return false
 end
 
 -- Identifier quoting and the column-stats type rules for adapters that

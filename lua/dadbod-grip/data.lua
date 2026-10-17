@@ -102,7 +102,8 @@ function M.new(query_result)
   -- Why the grid is read-only, for the messages edit keys show; nil if editable.
   local readonly_reason, readonly_badge
   if query_result.readonly == true then
-    readonly_reason, readonly_badge = "read-only connection", "read-only"
+    readonly_reason = query_result.readonly_reason or "read-only connection"
+    readonly_badge = "read-only"
   elseif table_name == nil then
     readonly_reason = "the query is not a plain SELECT from one table"
     readonly_badge = "read-only: query"

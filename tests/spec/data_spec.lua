@@ -57,6 +57,9 @@ test("new: read-only message names the reason", function()
   eq(data.readonly_message(make_state({ no_table_name = true })),
     "Read-only: the query is not a plain SELECT from one table", "no source table")
   eq(make_state({}).readonly_reason, nil, "editable grid has no reason")
+  eq(data.readonly_message(data.new({ columns = {}, rows = {}, primary_keys = {}, table_name = "t",
+    readonly = true, readonly_reason = "Grip cannot edit SQL Server tables yet" })),
+    "Read-only: Grip cannot edit SQL Server tables yet", "adapter without editing")
 end)
 
 test("new: editable when PKs present", function()
