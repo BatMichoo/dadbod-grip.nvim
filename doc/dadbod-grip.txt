@@ -117,7 +117,7 @@ Override if needed: >lua
   require("dadbod-grip").setup({
     limit            = 1000,
     max_col_width    = 40,
-    timeout          = 10000,
+    timeout          = 60000,
     connections_path = nil,
     picker           = "builtin",
     pinned_max       = nil,
@@ -1334,7 +1334,7 @@ Supported extensions: .parquet .csv .tsv .json .ndjson .jsonl .xlsx .orc .arrow 
 
 Remote file querying: `:Grip https://example.com/data.csv` opens remote
 files via DuckDB's httpfs extension. The extension is loaded automatically.
-Remote/file queries use the configured 10-second CLI timeout, except DuckDB
+Remote/file queries use the configured CLI timeout (60 seconds by default), except DuckDB
 work that may download httpfs/scanner extensions or read a remote URL gets a
 60-second minimum. All remote queries open in read-only mode.
 
@@ -1383,7 +1383,7 @@ grip.setup({opts})
     limit         (number)  Row cap when Grip opens a table or file (TOP N).
                             0 = no cap. Default: 1000
     max_col_width (number)  Max display width per column. Default: 40
-    timeout       (number)  Query timeout in ms. Default: 10000
+    timeout       (number)  Query timeout in ms. Default: 60000
     sticky_header (boolean) Column names in the winbar. Default: true
                             See |grip-sticky-header|
     open_sidebar  (boolean) Open schema sidebar on connect. Default: true

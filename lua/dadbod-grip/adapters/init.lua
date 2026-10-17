@@ -11,6 +11,15 @@ local M = {}
 --- one definition so that case reads the same either way.
 local TIMED_OUT = { stdout = "", stderr = "command timed out", code = 1 }
 
+--- vim.system reports its own timeout as code 124 with nothing on stderr,
+--- which surfaced as "exited with code 124". Say what happened instead.
+local function timeout_stderr(stderr, code, t)
+  if code == 124 and (stderr == nil or stderr == "") then
+    return string.format("Query timed out after %d s (the timeout option)", math.floor(t / 1000))
+  end
+  return stderr or ""
+end
+
 --- How long past the process timeout to keep waiting for on_exit before giving
 --- up on it: the blocking path polls this much longer, the non-blocking path's
 --- watchdog fires here. Exported so tests can shorten the wait.
@@ -67,7 +76,7 @@ function M.run_cmd(args, timeout_ms, opts)
   -- poll interval; tight polling just reduces per-call overhead in tests.
   vim.wait(t + M._exit_grace_ms, function() return done end, 1)
   local r = out or TIMED_OUT
-  return r.stdout or "", r.stderr or "", r.code
+  return r.stdout or "", timeout_stderr(r.stderr, r.code, t), r.code
 end
 
 --- Non-blocking twin of M.run_cmd: spawns the process and delivers
@@ -121,7 +130,7 @@ function M.run_cmd_async(args, timeout_ms, callback, opts)
   }
   local ok, err = pcall(vim.system, args, sys_opts, function(r)
     vim.schedule(function()
-      deliver(r.stdout or "", r.stderr or "", r.code)
+      deliver(r.stdout or "", timeout_stderr(r.stderr, r.code, t), r.code)
     end)
   end)
   if not ok then

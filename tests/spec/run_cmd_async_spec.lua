@@ -222,6 +222,16 @@ test("run_cmd_async: a late on_exit after the watchdog does not deliver twice", 
   if not ok then error(err) end
 end)
 
+test("a timed-out command says so instead of exit code 124", function()
+  local _, stderr, code = adapters.run_cmd({ "sleep", "5" }, 200)
+  assert(code == 124, "expected vim.system's timeout code, got " .. tostring(code))
+  assert(stderr:find("timed out after", 1, true), "stderr: " .. stderr)
+  local got
+  adapters.run_cmd_async({ "sleep", "5" }, 200, function(_, e) got = e end)
+  vim.wait(3000, function() return got ~= nil end, 10)
+  assert(got and got:find("timed out after", 1, true), "async stderr: " .. tostring(got))
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nrun_cmd_async_spec: %d passed, %d failed", pass, fail))

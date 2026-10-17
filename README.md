@@ -152,7 +152,7 @@ Dadbod Grip calls `setup()` with sensible defaults. Override only what you need:
 ```lua
 require("dadbod-grip").setup({
   limit = 100,
-  timeout = 10000,
+  timeout = 60000,
   open_sidebar = true,
 })
 ```

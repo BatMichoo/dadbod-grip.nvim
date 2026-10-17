@@ -8,7 +8,8 @@ local M = {}
 local OPTS = {
   limit       = 1000,
   max_col_width = 40,
-  timeout     = 10000,
+  -- Per query, in ms. SQL Server logins (Entra ID) alone can take seconds.
+  timeout     = 60000,
   connections_path = nil,
   picker      = "builtin",
   pinned_max  = nil,
@@ -68,7 +69,7 @@ function M.apply(opts)
   })
   OPTS.limit        = opts.limit        or 1000
   OPTS.max_col_width = opts.max_col_width or 40
-  OPTS.timeout      = opts.timeout      or 10000
+  OPTS.timeout      = opts.timeout      or 60000
   OPTS.connections_path = opts.connections_path or nil
   OPTS.picker = opts.picker or "builtin"
   if opts.pinned_max ~= nil then OPTS.pinned_max = opts.pinned_max end

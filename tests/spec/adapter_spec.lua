@@ -929,7 +929,7 @@ test("duckdb query: a scanner installed earlier this session keeps the default t
     local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT 1", url)
     end)
-    eq(opts.timeout, 10000, "a warm scanner must not buy network headroom")
+    eq(opts.timeout, 60000, "a warm scanner must not buy network headroom")
   end)
   duckdb.detach(url, "legacy")
 end)
@@ -940,7 +940,7 @@ test("duckdb query: a query with no attachments keeps the default timeout", func
     local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT 1", "duckdb::memory:")
     end)
-    eq(opts.timeout, 10000, "an unattached query has no INSTALL to wait for")
+    eq(opts.timeout, 60000, "an unattached query has no INSTALL to wait for")
   end)
 end)
 
@@ -980,7 +980,7 @@ test("duckdb attach: a DSN with no scanner keeps the default validation timeout"
   local _, opts = capture_system_call("42\n", function()
     duckdb.attach(url, "/tmp/plain.duckdb", "plain")
   end)
-  eq(opts.timeout, 10000, "no scanner means no fetch to wait for")
+  eq(opts.timeout, 60000, "no scanner means no fetch to wait for")
   duckdb.detach(url, "plain")
 end)
 
