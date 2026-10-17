@@ -298,6 +298,53 @@ test("stats: one T-SQL scan, skipping types the aggregates reject", function()
   end)
 end)
 
+test("stats: Postgres casts types without min/max; falls back to counts", function()
+  cleanup()
+  local db_mod = require("dadbod-grip.db")
+  local orig_q, orig_cols = db_mod.query, db_mod.get_column_info
+  db_mod.get_column_info = function()
+    return {
+      { column_name = "created_by", data_type = "uuid" },
+      { column_name = "ok", data_type = "boolean" },
+      { column_name = "mood", data_type = "USER-DEFINED" },
+      { column_name = "at", data_type = "point" },
+    }
+  end
+  local sent = {}
+  local fail_first = false
+  db_mod.query = function(q)
+    sent[#sent + 1] = q
+    if fail_first and #sent == 1 then return nil, "function min(foo) does not exist" end
+    return { columns = {}, rows = { { "2", "2", "2", "a", "b", "2", "1", "0", "1", "2", "2", "x", "y", "2" } } }
+  end
+  local orig_notify = vim.notify
+  local notes = {}
+  vim.notify = function(msg) notes[#notes + 1] = msg end
+  local ok, err = pcall(function()
+    local url = "postgresql://u@host/app"
+    local st = data.new({ columns = { "id" }, rows = { { "1" } }, table_name = "public.t", url = url })
+    local bufnr = view.open(st, url, "SELECT * FROM public.t", {})
+    view.switch_view(bufnr, "stats")
+    eq(#sent, 1, "one query")
+    assert(sent[1]:find('MIN(CAST("created_by" AS TEXT))', 1, true), "uuid cast: " .. sent[1])
+    assert(sent[1]:find('MIN(CAST("ok" AS INT))', 1, true), "boolean cast")
+    assert(sent[1]:find('MIN(CAST("mood" AS TEXT))', 1, true), "USER-DEFINED cast")
+    assert(not sent[1]:find('DISTINCT "at"', 1, true), "point skipped")
+
+    sent, fail_first = {}, true
+    view._sessions[bufnr].current_view = "records"
+    view.switch_view(bufnr, "stats")
+    eq(#sent, 2, "retry once")
+    assert(not sent[2]:find("MIN(", 1, true), "retry has counts only")
+    eq(view._sessions[bufnr].current_view, "stats", "stats shown")
+    assert(table.concat(notes, "\n"):find("min(foo)", 1, true), "reason shown")
+  end)
+  vim.notify = orig_notify
+  db_mod.query, db_mod.get_column_info = orig_q, orig_cols
+  cleanup()
+  if not ok then error(err) end
+end)
+
 test("stats: a failed query warns and leaves the view unchanged", function()
   with_stats_grid(function() return nil, "Invalid object name" end, function(bufnr, notes)
     view.switch_view(bufnr, "stats")

@@ -2008,17 +2008,27 @@ local function fetch_view_constraints(table_name, url, session)
 end
 
 -- Per-dialect pieces of the stats query: identifier quoting, the type MIN/MAX
--- are cast to for display, and the column types the aggregates reject.
+-- are cast to for display, the column types the aggregates reject outright
+-- (no_compare), and the types that compare once cast (cast_from: type -> cast).
 local STATS_DIALECT = {
   default = { quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end, text = "TEXT" },
   mysql = { quote = function(n) return "`" .. n:gsub("`", "``") .. "`" end, text = "CHAR" },
+  postgresql = {
+    quote = function(n) return '"' .. n:gsub('"', '""') .. '"' end,
+    text = "TEXT",
+    -- Geometric types have no equality, so not even COUNT(DISTINCT) works.
+    no_compare = { point = true, line = true, lseg = true, box = true, path = true, polygon = true, circle = true },
+    -- No min/max for these (json has no equality either). Enums, domains and
+    -- extension types report USER-DEFINED; text is the one cast all of them take.
+    cast_from = { uuid = "TEXT", boolean = "INT", json = "TEXT", jsonb = "TEXT", xml = "TEXT",
+      array = "TEXT", ["user-defined"] = "TEXT" },
+  },
   sqlserver = {
     quote = function(n) return "[" .. n:gsub("%]", "]]") .. "]" end,
     text = "NVARCHAR(100)",
-    -- COUNT(DISTINCT), MIN and MAX all fail on these.
     no_compare = { text = true, ntext = true, image = true, xml = true, geography = true, geometry = true },
     -- MIN/MAX reject bit; compare it as a number instead.
-    as_int = { bit = true },
+    cast_from = { bit = "INT" },
   },
 }
 
@@ -2040,28 +2050,36 @@ local function fetch_view_stats(table_name, url, session)
 
   -- One row, one scan: COUNT(*) once, then four aggregates per column. A
   -- UNION ALL per column scanned the table once per column.
-  local select_list = { "COUNT(*)" }
-  for _, c in ipairs(cols) do
-    local q = d.quote(c.column_name)
-    local base = tostring(c.data_type or ""):lower():match("^[%a_ ]+") or ""
-    base = vim.trim(base)
-    select_list[#select_list + 1] = "COUNT(" .. q .. ")"
-    if d.no_compare and d.no_compare[base] then
-      select_list[#select_list + 1] = "NULL"
-      select_list[#select_list + 1] = "NULL"
-      select_list[#select_list + 1] = "NULL"
-    else
-      local v = (d.as_int and d.as_int[base]) and ("CAST(" .. q .. " AS INT)") or q
-      select_list[#select_list + 1] = "COUNT(DISTINCT " .. v .. ")"
-      select_list[#select_list + 1] = "CAST(MIN(" .. v .. ") AS " .. d.text .. ")"
-      select_list[#select_list + 1] = "CAST(MAX(" .. v .. ") AS " .. d.text .. ")"
+  local function build(compare)
+    local select_list = { "COUNT(*)" }
+    for _, c in ipairs(cols) do
+      local q = d.quote(c.column_name)
+      local base = vim.trim(tostring(c.data_type or ""):lower():match("^[%a_ %-]+") or "")
+      local cast = d.cast_from and d.cast_from[base]
+      select_list[#select_list + 1] = "COUNT(" .. q .. ")"
+      if (d.no_compare and d.no_compare[base]) or not compare then
+        select_list[#select_list + 1] = "NULL"
+        select_list[#select_list + 1] = "NULL"
+        select_list[#select_list + 1] = "NULL"
+      else
+        local v = cast and ("CAST(" .. q .. " AS " .. cast .. ")") or q
+        select_list[#select_list + 1] = "COUNT(DISTINCT " .. v .. ")"
+        select_list[#select_list + 1] = "CAST(MIN(" .. v .. ") AS " .. d.text .. ")"
+        select_list[#select_list + 1] = "CAST(MAX(" .. v .. ") AS " .. d.text .. ")"
+      end
     end
+    return "SELECT " .. table.concat(select_list, ", ") .. " FROM " .. table.concat(tbl, ".")
   end
-  local stats_sql = "SELECT " .. table.concat(select_list, ", ")
-    .. " FROM " .. table.concat(tbl, ".")
 
-  local result, query_err = db_mod.query(stats_sql, url)
-  if query_err then return nil, nil, "Stats query failed: " .. query_err end
+  local result, query_err = db_mod.query(build(true), url)
+  if query_err then
+    -- A column type with no ordering we did not foresee fails the whole
+    -- query. Counts still work on any type: show those rather than nothing.
+    local counts = db_mod.query(build(false), url)
+    if not counts then return nil, nil, "Stats query failed: " .. query_err end
+    result = counts
+    vim.notify("Grip stats: distinct/min/max unavailable: " .. query_err, vim.log.levels.WARN)
+  end
   if not result or not result.rows or not result.rows[1] then return nil, nil, "no stats result" end
 
   local r = result.rows[1]
