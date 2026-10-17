@@ -101,11 +101,18 @@ local function resolve_query(arg, limit, adapter_kind)
     return query.new_raw(file_sql, limit), nil, path
   end
 
-  -- Detect statement type
-  local upper = arg:upper():match("^%s*(%u+)")
+  -- Detect statement type from the first word after any leading comments
+  local body = arg
+  while true do
+    local rest = body:match("^%s*%-%-[^\n]*\n(.*)$") or body:match("^%s*/%*.-%*/(.*)$")
+    if not rest then break end
+    body = rest
+  end
+  if body:match("^%s*%-%-") then body = "" end
+  local upper = body:upper():match("^%s*(%u+)")
   if upper == "SELECT" or upper == "TABLE" then
     local table_name = nil
-    local flat = arg:gsub("\n", " ")
+    local flat = body:gsub("\n", " ")
     if upper == "TABLE" then
       -- TABLE <name> is always a single table
       local raw = flat:match('^%s*[Tt][Aa][Bb][Ll][Ee]%s+"([^"]+)"')
@@ -137,8 +144,13 @@ local function resolve_query(arg, limit, adapter_kind)
     or upper == "BEGIN" or upper == "COMMIT" or upper == "ROLLBACK" then
     return nil, nil, nil, arg  -- 4th return = mutation SQL
   end
-  -- Otherwise treat as table name
-  return query.new_table(arg, limit), arg
+  -- A bare name (dbo.Users, [Order Details], "x") is a table to open
+  local name = vim.trim(arg)
+  if not name:find("%s") or name:match('^[%[%"`][^\n]*[%]%"`]$') then
+    return query.new_table(name, limit), name
+  end
+  -- Any other statement (EXEC, DECLARE, SET, USE, MERGE, ...) runs as written
+  return query.new_raw(arg), nil
 end
 
 local function do_apply(...) return actions.do_apply(...) end
