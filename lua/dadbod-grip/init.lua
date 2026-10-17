@@ -1,27 +1,37 @@
 -- init.lua: plugin entry point — setup(), open() and the public API.
 -- Commands live in commands.lua, the start screen in welcome.lua, grid
 -- actions (apply, refresh, edit) in session_actions.lua.
+--
+-- Loaded at startup by plugin/dadbod-grip.lua, so every other module is
+-- required on first use: setup() itself only stores options and registers
+-- the commands.
 
-local db     = require("dadbod-grip.db")
-local data   = require("dadbod-grip.data")
-local view   = require("dadbod-grip.view")
-local sql    = require("dadbod-grip.sql")
-local esc = sql.escape_literal
-local query  = require("dadbod-grip.query")
-local ui     = require("dadbod-grip.ui")
-local explain = require("dadbod-grip.explain")
-local filetypes = require("dadbod-grip.filetypes")
-local importer = require("dadbod-grip.importer")
-local adapters = require("dadbod-grip.adapters")
+local function lazy(name)
+  return setmetatable({}, { __index = function(_, k) return require(name)[k] end })
+end
+local db       = lazy("dadbod-grip.db")
+local data     = lazy("dadbod-grip.data")
+local view     = lazy("dadbod-grip.view")
+local query    = lazy("dadbod-grip.query")
+local ui       = lazy("dadbod-grip.ui")
+local filetypes = lazy("dadbod-grip.filetypes")
+local importer = lazy("dadbod-grip.importer")
+local adapters = lazy("dadbod-grip.adapters")
+local actions  = lazy("dadbod-grip.session_actions")
+local sql      = lazy("dadbod-grip.sql")
+local function esc(s) return sql.escape_literal(s) end
 
 local M = {}
 M._version = require("dadbod-grip.version")
 
--- Query Doctor moved to explain.lua; the historical names stay on the plugin
--- module. Bound here, not in setup(), so they exist before the first setup().
-M._parse_explain_nodes = explain.parse_nodes
-M._render_query_doctor = explain.render
+-- Highlight groups are defined up front: the sidebar, query pad and popups
+-- use them before any grid (which would otherwise load them) exists.
+require("dadbod-grip.view.highlights")
 
+-- Query Doctor moved to explain.lua; the historical names stay on the plugin
+-- module.
+function M._parse_explain_nodes(...) return require("dadbod-grip.explain").parse_nodes(...) end
+function M._render_query_doctor(...) return require("dadbod-grip.explain").render(...) end
 
 local config = require("dadbod-grip.config")
 local OPTS = config.values
@@ -58,7 +68,9 @@ local function deny_if_readonly(cmd_name, url)
   return require("dadbod-grip.connections").deny_if_readonly(cmd_name, url)
 end
 
-local select_editable_table = require("dadbod-grip.editable_source").select_editable_table
+local function select_editable_table(...)
+  return require("dadbod-grip.editable_source").select_editable_table(...)
+end
 
 -- Decide the query spec for a given :Grip argument.
 -- Returns (spec, table_name, file_path) or (nil, err_string).
@@ -129,12 +141,14 @@ local function resolve_query(arg, limit, adapter_kind)
   return query.new_table(arg, limit), arg
 end
 
-local actions = require("dadbod-grip.session_actions")
-local do_apply, do_refresh, do_edit = actions.do_apply, actions.do_refresh, actions.do_edit
-local spinner_label, fetch_refresh, apply_refresh =
-  actions.spinner_label, actions.fetch_refresh, actions.apply_refresh
-M._mutation_preview = actions._mutation_preview
-M._next_edit_cursor = actions._next_edit_cursor
+local function do_apply(...) return actions.do_apply(...) end
+local function do_refresh(...) return actions.do_refresh(...) end
+local function do_edit(...) return actions.do_edit(...) end
+local function spinner_label(...) return actions.spinner_label(...) end
+local function fetch_refresh(...) return actions.fetch_refresh(...) end
+local function apply_refresh(...) return actions.apply_refresh(...) end
+function M._mutation_preview(...) return actions._mutation_preview(...) end
+function M._next_edit_cursor(...) return actions._next_edit_cursor(...) end
 
 -- ── open ──────────────────────────────────────────────────────────────────
 ---Open a table or raw SQL query in a grip grid.
