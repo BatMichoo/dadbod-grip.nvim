@@ -299,10 +299,90 @@ local function parse_sqlcmd_table(raw)
   return { columns = columns, rows = rows }
 end
 
+--- Lower-cased copy of `sql` with everything that is not top-level SQL blanked:
+--- string literals, [bracketed] and "quoted" names, comments and the inside
+--- of parentheses. Positions line up with `sql`, so a keyword found here is a
+--- top-level keyword at the same index there.
+local function mask_top_level(sql)
+  local out, depth, i, n = {}, 0, 1, #sql
+  local function blank(from, to)
+    for k = from, to do out[k] = " " end
+  end
+  while i <= n do
+    local c, two = sql:sub(i, i), sql:sub(i, i + 1)
+    local stop
+    if two == "--" then
+      stop = (sql:find("\n", i, true) or (n + 1)) - 1
+    elseif two == "/*" then
+      local _, e = sql:find("*/", i + 2, true)
+      stop = e or n
+    elseif c == "'" or c == '"' or c == "[" then
+      local close = c == "[" and "]" or c
+      local j = i + 1
+      while j <= n do
+        if sql:sub(j, j) == close then
+          if sql:sub(j + 1, j + 1) == close then j = j + 1 else break end
+        end
+        j = j + 1
+      end
+      stop = math.min(j, n)
+    end
+    if stop then
+      blank(i, stop)
+      i = stop + 1
+    else
+      if c == "(" then depth = depth + 1 end
+      out[i] = depth > 0 and " " or c:lower()
+      if c == ")" then depth = math.max(depth - 1, 0) end
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+--- Make a raw query valid as the subquery Grip wraps it in to sort or filter
+--- (SELECT * FROM (<query>) AS _grip ...). SQL Server rejects two things
+--- there that it accepts on their own:
+---   * a CTE: WITH has to come before the outer SELECT, so it is moved out;
+---   * ORDER BY without TOP or OFFSET: it gets OFFSET 0 ROWS, which keeps the
+---     query's own order meaning and makes the subquery legal.
+local function normalize_wrapped(sql_str)
+  local pre, inner, post = sql_str:match("^(SELECT .-FROM %()(.*)(%s*%) AS _grip.*)$")
+  if not inner then return sql_str end
+
+  local cte = ""
+  local masked = mask_top_level(inner)
+  if masked:match("^%s*with%f[^%w_]") then
+    local sel = masked:find("%f[%w_]select%f[^%w_]")
+    if not sel then return sql_str end
+    cte = inner:sub(1, sel - 1)
+    inner = inner:sub(sel)
+    masked = masked:sub(sel)
+  end
+
+  local order_at
+  local from = 1
+  while true do
+    local s = masked:find("%f[%w_]order%s+by%f[^%w_]", from)
+    if not s then break end
+    order_at, from = s, s + 1
+  end
+  local has_top = masked:match("^%s*select%s+top%f[^%w_]")
+    or masked:match("^%s*select%s+distinct%s+top%f[^%w_]")
+  if order_at and not has_top
+      and not masked:sub(order_at):find("%f[%w_]offset%f[^%w_]")
+      and not masked:sub(order_at):find("%f[%w_]for%s+[xj]") then
+    inner = inner .. "\nOFFSET 0 ROWS"
+  end
+  return cte .. pre .. inner .. post
+end
+M._normalize_wrapped = normalize_wrapped
+
 --- Translate the LIMIT/OFFSET tail emitted by the shared query builder into
 --- SQL Server's OFFSET/FETCH syntax. The adapter boundary is the only place
 --- that knows the dialect, so every initial query and requery gets the fix.
 local function normalize_query_sql(sql_str)
+  sql_str = normalize_wrapped(sql_str)
   local base, limit, offset = sql_str:match(
     "^(.-)%s+[Ll][Ii][Mm][Ii][Tt]%s+(%d+)%s+[Oo][Ff][Ff][Ss][Ee][Tt]%s+(%d+)%s*;?%s*$")
   if not base then

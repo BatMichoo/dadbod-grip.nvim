@@ -270,6 +270,14 @@ local function where_clause(filters)
   return "WHERE " .. table.concat(parts, " AND ")
 end
 
+--- A raw query as a subquery. The closing parenthesis goes on its own line
+--- when the query has a -- comment, or a comment on its last line would
+--- swallow it.
+local function wrap_raw(base_sql)
+  local close = base_sql:find("--", 1, true) and "\n)" or ")"
+  return "(" .. base_sql .. close .. " AS _grip"
+end
+
 --- Build the data query SQL from a spec. Raw SQL with no sort or filter is
 --- returned as written. opts.uncapped=true keeps the filters and sorts but
 --- drops a table's LIMIT (used by all-row export).
@@ -282,7 +290,7 @@ function M.build_sql(spec, opts)
   -- FROM clause
   local from
   if spec.is_raw then
-    from = "(" .. spec.base_sql .. ") AS _grip"
+    from = wrap_raw(spec.base_sql)
   else
     from = sql_mod.quote_ident(spec.table_name)
   end
@@ -315,7 +323,7 @@ function M.build_count_sql(spec)
   local parts = {}
   local from
   if spec.is_raw then
-    from = "(" .. spec.base_sql .. ") AS _grip"
+    from = wrap_raw(spec.base_sql)
   else
     from = sql_mod.quote_ident(spec.table_name)
   end

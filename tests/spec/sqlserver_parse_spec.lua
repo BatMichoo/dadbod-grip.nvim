@@ -60,5 +60,43 @@ test("rows-affected line ends the rows", function()
   eq(r.rows, { { "1", "2" } })
 end)
 
+-- ── sorting/filtering a raw query: the _grip subquery ──────────────────────
+local wrap = ss._normalize_wrapped
+local q = require("dadbod-grip.query")
+
+local function sorted(raw)
+  return q.build_sql(q.toggle_sort(q.new_raw(raw), "id"))
+end
+
+test("inner ORDER BY gets OFFSET 0 ROWS", function()
+  eq(wrap(sorted("SELECT id FROM t ORDER BY name")),
+    'SELECT * FROM (SELECT id FROM t ORDER BY name\nOFFSET 0 ROWS) AS _grip ORDER BY "id" ASC')
+end)
+
+test("ORDER BY inside a subquery or string is not top-level", function()
+  local raw = "SELECT id, (SELECT TOP 1 x FROM u ORDER BY x) AS y FROM t WHERE n = 'order by'"
+  eq(wrap(sorted(raw)), sorted(raw))
+end)
+
+test("TOP and OFFSET queries are left alone", function()
+  eq(wrap(sorted("SELECT TOP 5 id FROM t ORDER BY id")), sorted("SELECT TOP 5 id FROM t ORDER BY id"))
+  local off = "SELECT id FROM t ORDER BY id OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY"
+  eq(wrap(sorted(off)), sorted(off))
+end)
+
+test("a CTE moves in front of the wrapper", function()
+  eq(wrap(sorted("WITH a AS (SELECT 1 AS id) SELECT id FROM a")),
+    'WITH a AS (SELECT 1 AS id) SELECT * FROM (SELECT id FROM a) AS _grip ORDER BY "id" ASC')
+end)
+
+test("a trailing -- comment does not swallow the closing parenthesis", function()
+  eq(sorted("SELECT id FROM t -- note"),
+    'SELECT * FROM (SELECT id FROM t -- note\n) AS _grip ORDER BY "id" ASC')
+end)
+
+test("plain queries pass through", function()
+  eq(wrap("SELECT * FROM t"), "SELECT * FROM t")
+end)
+
 print(string.format("\nsqlserver_parse_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
