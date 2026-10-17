@@ -100,13 +100,6 @@ local function mysql_query(parsed, sql_str, timeout_ms)
     { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed) })
 end
 
---- Run a statement without blocking; same argv, stdin and env as mysql_query.
-local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
-  local opts = adapters.session_opts()
-  adapters.run_cmd_async(mysql_args(parsed), timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    callback, { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed) })
-end
-
 function M.query(sql_str, url)
   if vim.fn.executable("mysql") == 0 then
     return nil, "mysql not found. Install mysql-client."
@@ -290,66 +283,6 @@ function M.get_referencing_foreign_keys(table_name, url)
     })
   end
   return db_util.group_referencing_fks(entries), nil
-end
-
---- The one schema-batch statement, shared by get_schema_batch and
---- get_schema_batch_async so the two paths can never query different things.
-local SCHEMA_BATCH_SQL = [[
-    SELECT
-      c.TABLE_NAME AS table_name,
-      c.COLUMN_NAME AS column_name,
-      c.COLUMN_TYPE AS data_type, -- DDL spelling; see get_column_info
-      c.IS_NULLABLE AS is_nullable
-    FROM information_schema.COLUMNS c
-    WHERE c.TABLE_SCHEMA = DATABASE()
-    ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
-  ]]
-
---- Parse SCHEMA_BATCH_SQL's --batch output into the completion cache format.
---- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
---- The single parser for both the blocking and non-blocking paths.
-local function parse_schema_batch(stdout)
-  local result = parse_output(stdout)
-  if not result then return nil end
-
-  local tables = {}
-  for _, row in ipairs(result.rows) do
-    local tname     = row[1] or ""
-    local col_name  = row[2] or ""
-    local data_type = normalize_column_type(row[3] or "")
-    local nullable  = row[4] or ""
-    tables[tname] = tables[tname] or {}
-    table.insert(tables[tname], { column_name = col_name, data_type = data_type, is_nullable = nullable })
-  end
-  return tables
-end
-
---- Fetch all table columns in a single query (O(1) CLI spawns).
---- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
-function M.get_schema_batch(url)
-  local parsed = parse_url(url)
-  if not parsed then return nil end
-
-  local stdout, _, code = mysql_query(parsed, SCHEMA_BATCH_SQL)
-  if code ~= 0 then return nil end
-
-  return parse_schema_batch(stdout)
-end
-
---- Async variant: same statement, same parser, non-blocking spawn.
---- Calls callback(tables), or callback(nil) on a bad URL or a failed mysql.
---- Used to pre-warm the completion cache on connection switch / GripAttach.
-function M.get_schema_batch_async(url, callback)
-  local parsed = parse_url(url)
-  -- Deliver via vim.schedule even on this guard path: run_cmd_async's contract
-  -- is that the callback never fires on the calling tick, and a caller must not
-  -- be able to tell a bad URL from a spawn failure by that timing difference.
-  if not parsed then vim.schedule(function() callback(nil) end); return end
-
-  mysql_query_async(parsed, SCHEMA_BATCH_SQL, nil, function(stdout, _, code)
-    if code ~= 0 then callback(nil); return end
-    callback(parse_schema_batch(stdout))
-  end)
 end
 
 function M.explain(sql_str, url)

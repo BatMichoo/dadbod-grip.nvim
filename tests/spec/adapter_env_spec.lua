@@ -1,4 +1,4 @@
--- adapter_env_spec.lua -- run_cmd/run_cmd_async accept an opts.env table that
+-- adapter_env_spec.lua -- run_cmd accepts an opts.env table that
 -- is merged into the child process's inherited environment. Later tasks use
 -- this to pass PGPASSWORD/MYSQL_PWD/PGOPTIONS without putting secrets on the
 -- command line where they would be visible via `ps`.
@@ -43,26 +43,6 @@ end)
 
 test("run_cmd without env still works", function()
   local out = adapters.run_cmd({ "sh", "-c", "printf ok" }, 5000)
-  eq(out, "ok", "no-opts call unchanged")
-end)
-
-test("run_cmd_async passes env to the child process", function()
-  local out, done
-  adapters.run_cmd_async({ "sh", "-c", "printf %s \"$GRIP_TEST_VAR\"" }, 5000, function(stdout)
-    out = stdout
-    done = true
-  end, { env = { GRIP_TEST_VAR = "async-sentinel" } })
-  vim.wait(5000, function() return done end, 1)
-  eq(out, "async-sentinel", "async child sees the injected variable")
-end)
-
-test("run_cmd_async without opts still works", function()
-  local out, done
-  adapters.run_cmd_async({ "sh", "-c", "printf ok" }, 5000, function(stdout)
-    out = stdout
-    done = true
-  end)
-  vim.wait(5000, function() return done end, 1)
   eq(out, "ok", "no-opts call unchanged")
 end)
 

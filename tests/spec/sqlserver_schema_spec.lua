@@ -1,14 +1,6 @@
--- sqlserver_schema_spec.lua: parse-level tests for the sqlserver schema queries
--- (get_schema_batch / get_column_info).
---
--- The schema tests mirror the pg/mysql/sqlite get_schema_batch tests in
--- adapter_spec.lua: feed sqlcmd's tab-separated output through the real parser
--- and assert on the structure, without a server.
---
--- This file used to also carry a generic "adapters.run_cmd_async contract"
--- section (added alongside the SQL Server watchdog work); it moved to
--- tests/spec/run_cmd_async_spec.lua in full, so run_cmd_async has one home
--- instead of two.
+-- sqlserver_schema_spec.lua: parse-level tests for the sqlserver catalog
+-- queries and error handling: feed sqlcmd's tab-separated output through the
+-- real parser and assert on the structure, without a server.
 local sqlserver = require("dadbod-grip.adapters.sqlserver")
 
 local pass = 0
@@ -74,82 +66,7 @@ local function lines(t)
   return table.concat(t, "\n") .. "\n"
 end
 
--- ── get_schema_batch ─────────────────────────────────────────────────────────
-
-local BATCH_OUT = lines({
-  "table_name\tcolumn_name\tdata_type\tis_nullable",
-  "----------\t-----------\t---------\t-----------",
-  "users\tid\tint\tNO",
-  "users\tname\tnvarchar(100)\tNO",
-  "users\temail\tnvarchar(255)\tYES",
-  "orders\tid\tint\tNO",
-  "orders\ttotal\tdecimal(10,2)\tNO",
-  "",
-  "(5 rows affected)",
-})
-
-test("sqlserver get_schema_batch: groups columns by table", function()
-  local result
-  with_executable(function()
-    with_system_mock(BATCH_OUT, "", 0, function()
-      result = sqlserver.get_schema_batch(URL)
-    end)
-  end)
-  assert(result, "result must not be nil")
-  assert(result["users"], "must have users key")
-  assert(result["orders"], "must have orders key")
-  eq(#result["users"], 3, "users has 3 columns")
-  eq(#result["orders"], 2, "orders has 2 columns")
-  eq(result["users"][2].column_name, "name", "users second column")
-  eq(result["users"][2].data_type, "nvarchar(100)", "length suffix survives")
-  eq(result["users"][2].is_nullable, "NO", "name is NOT NULL")
-  eq(result["users"][3].is_nullable, "YES", "email is nullable")
-  eq(result["orders"][2].data_type, "decimal(10,2)", "precision,scale suffix survives")
-end)
-
-test("sqlserver get_schema_batch: (N rows affected) is not a column row", function()
-  local result
-  with_executable(function()
-    with_system_mock(BATCH_OUT, "", 0, function()
-      result = sqlserver.get_schema_batch(URL)
-    end)
-  end)
-  for tname, cols in pairs(result) do
-    contains(tname, "", "table name")
-    assert(not tname:find("rows affected", 1, true), "row-count line leaked in as a table: " .. tname)
-    for _, c in ipairs(cols) do
-      assert(not c.column_name:find("rows affected", 1, true),
-        "row-count line leaked in as a column of " .. tname)
-    end
-  end
-  eq(#result["orders"], 2, "orders still has exactly 2 columns")
-end)
-
-test("sqlserver get_schema_batch: failure returns nil", function()
-  local result = "unset"
-  with_executable(function()
-    with_system_mock("", "Login failed for user 'sa'.", 1, function()
-      result = sqlserver.get_schema_batch(URL)
-    end)
-  end)
-  eq(result, nil, "must return nil when sqlcmd fails")
-end)
-
--- A server error is not a result grid: with -b sqlcmd exits non-zero and prints
--- "Msg 208, ..." on stdout, and the parser must never be handed that as data.
-test("sqlserver get_schema_batch: Msg error text is not parsed as a grid", function()
-  local msg = lines({
-    "Msg 208, Level 16, State 1, Server abc, Line 2",
-    "Invalid object name 'INFORMATION_SCHEMA.COLUMNS'.",
-  })
-  local result = "unset"
-  with_executable(function()
-    with_system_mock(msg, "", 1, function()
-      result = sqlserver.get_schema_batch(URL)
-    end)
-  end)
-  eq(result, nil, "error text must not become a schema table")
-end)
+-- ── errors ───────────────────────────────────────────────────────────────────
 
 test("sqlserver query: Msg error text on stdout becomes err, not columns", function()
   local msg = lines({
@@ -285,42 +202,9 @@ end)
 
 -- MAX types report CHARACTER_MAXIMUM_LENGTH = -1, which the plain `> 0` guard
 -- silently dropped; both statements must ask for the (max) arm.
-test("sqlserver: batch and column_info both handle CHARACTER_MAXIMUM_LENGTH = -1", function()
-  with_executable(function()
-    local batch_args = capture_system_args(BATCH_OUT, function()
-      sqlserver.get_schema_batch(URL)
-    end)
-    local info_args = capture_system_args(COLUMN_INFO_OUT, function()
-      sqlserver.get_column_info("users", URL)
-    end)
-    for _, case in ipairs({ { "get_schema_batch", batch_args }, { "get_column_info", info_args } }) do
-      local sent = case[2]._stdin
-      contains(sent, "CHARACTER_MAXIMUM_LENGTH = -1", case[1] .. " must special-case MAX types")
-      contains(sent, "'(max)'", case[1] .. " must render them as (max)")
-    end
-  end)
-end)
 
 -- The two statements must stay in sync: a table read from the batch and the same
 -- table read per-table have to report the same data_type string.
-test("sqlserver: batch and column_info share one data_type expression", function()
-  local function type_expr(sent)
-    return sent:match("(DATA_TYPE %+.-END AS data_type)")
-  end
-  with_executable(function()
-    local batch_args = capture_system_args(BATCH_OUT, function()
-      sqlserver.get_schema_batch(URL)
-    end)
-    local info_args = capture_system_args(COLUMN_INFO_OUT, function()
-      sqlserver.get_column_info("users", URL)
-    end)
-    local a = type_expr(batch_args._stdin)
-    local b = type_expr(info_args._stdin)
-    assert(a, "batch statement must contain the data_type expression")
-    assert(b, "column_info statement must contain the data_type expression")
-    eq(a, b, "the two data_type expressions must be identical")
-  end)
-end)
 
 -- ── get_referencing_foreign_keys ────────────────────────────────────────────
 -- Columns are child_schema, child_table, fk_column, ref_column, constraint_name.

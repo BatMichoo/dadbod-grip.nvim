@@ -220,66 +220,6 @@ function M.get_referencing_foreign_keys(table_name, url)
   return refs, nil
 end
 
---- The one schema-batch statement, shared by get_schema_batch and
---- get_schema_batch_async so the two paths can never query different things.
-local SCHEMA_BATCH_SQL = [[
-    SELECT m.name AS table_name,
-           p.name AS column_name,
-           p.type AS data_type,
-           CASE WHEN p."notnull" = 1 THEN 'NO' ELSE 'YES' END AS is_nullable
-    FROM sqlite_master m, pragma_table_info(m.name) p
-    WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%'
-    ORDER BY m.name, p.cid
-  ]]
-
---- Parse SCHEMA_BATCH_SQL's CSV into the completion cache format.
---- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
---- The single parser for both the blocking and non-blocking paths.
-local function parse_schema_batch(stdout)
-  local parsed = db_util.parse_csv(stdout)
-  if not parsed then return nil end
-
-  local tables = {}
-  for _, row in ipairs(parsed.rows) do
-    local tname     = row[1] or ""
-    local col_name  = row[2] or ""
-    local data_type = row[3] or ""
-    local nullable  = row[4] or ""
-    tables[tname] = tables[tname] or {}
-    table.insert(tables[tname], { column_name = col_name, data_type = data_type, is_nullable = nullable })
-  end
-  return tables
-end
-
---- Fetch all table columns in a single query (O(1) CLI spawns).
---- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
-function M.get_schema_batch(url)
-  local db_path = extract_path(url)
-  if not db_path then return nil end
-
-  local stdout, _, code = sqlite3(db_path, SCHEMA_BATCH_SQL)
-  if code ~= 0 then return nil end
-
-  return parse_schema_batch(stdout)
-end
-
---- Async variant: same statement, same parser, non-blocking spawn.
---- Calls callback(tables), or callback(nil) on a bad URL or a failed sqlite3.
---- Used to pre-warm the completion cache on connection switch / GripAttach.
-function M.get_schema_batch_async(url, callback)
-  local db_path = extract_path(url)
-  -- Deliver via vim.schedule even on this guard path: run_cmd_async's contract
-  -- is that the callback never fires on the calling tick, and a caller must not
-  -- be able to tell a bad URL from a spawn failure by that timing difference.
-  if not db_path then vim.schedule(function() callback(nil) end); return end
-
-  adapters.run_cmd_async(sqlite3_args(db_path, adapters.session_opts()),
-    adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
-      if code ~= 0 then callback(nil); return end
-      callback(parse_schema_batch(stdout))
-    end, { stdin = SCHEMA_BATCH_SQL })
-end
-
 function M.explain(sql_str, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid SQLite URL: " .. url end

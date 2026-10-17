@@ -116,7 +116,7 @@ local ok, err = xpcall(function()
     end, query_secret)
 
     inspect(case, "schema", function()
-      case.mod.get_schema_batch(case.url)
+      case.mod.list_tables(case.url)
     end, case.schema_token)
 
     local mutation_secret = "mutation_value_secret_" .. case.name

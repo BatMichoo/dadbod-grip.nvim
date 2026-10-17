@@ -5,10 +5,8 @@ local M = {}
 
 --- Last-resort answer for a spawn whose on_exit never arrives at all. It is *not*
 --- what an ordinary timeout looks like: vim.system's own `timeout` kills the
---- process and still calls on_exit, so both run paths report that as code 124
---- with empty stderr (verified live), and callers surface it as "exited with code
---- 124". This only covers on_exit going missing entirely, and both paths use the
---- one definition so that case reads the same either way.
+--- process and still calls on_exit with code 124 (see timeout_stderr). This
+--- only covers on_exit going missing entirely.
 local TIMED_OUT = { stdout = "", stderr = "command timed out", code = 1 }
 
 --- vim.system reports its own timeout as code 124 with nothing on stderr,
@@ -20,9 +18,8 @@ local function timeout_stderr(stderr, code, t)
   return stderr or ""
 end
 
---- How long past the process timeout to keep waiting for on_exit before giving
---- up on it: the blocking path polls this much longer, the non-blocking path's
---- watchdog fires here. Exported so tests can shorten the wait.
+--- How long past the process timeout run_cmd keeps waiting for on_exit before
+--- giving up on it. Exported so tests can shorten the wait.
 M._exit_grace_ms = 3000
 
 --- Resolve the public setup({ timeout = ... }) value at call time. Keeping it
@@ -77,65 +74,6 @@ function M.run_cmd(args, timeout_ms, opts)
   vim.wait(t + M._exit_grace_ms, function() return done end, 1)
   local r = out or TIMED_OUT
   return r.stdout or "", timeout_stderr(r.stderr, r.code, t), r.code
-end
-
---- Non-blocking twin of M.run_cmd: spawns the process and delivers
---- (stdout, stderr, exit_code) to `callback` from the main Neovim loop via
---- vim.schedule, so the callback may touch buffers and Lua state freely.
---- Used by the get_schema_batch_async implementations that pre-warm the
---- completion cache; no vim.wait here, that is the whole point.
----
---- Same never-throw contract as M.run_cmd: vim.system() raises on spawn failure
---- (ENOENT when the CLI is not installed), so that is caught and reported as a
---- non-zero exit instead of escaping into the caller's callback-free stack.
----
---- An on_exit that never fires would strand the caller forever -- there is no
---- vim.wait here to notice -- so a watchdog delivers the same TIMED_OUT answer
---- the blocking path falls back to, at the same deadline. An ordinary timeout
---- does not reach it: vim.system kills the process and calls on_exit with code
---- 124, well before the watchdog is due.
----
---- @param args  string[]   argv for vim.system
---- @param timeout_ms number|nil  process timeout in ms (default 30000)
---- @param callback fun(stdout: string, stderr: string, code: number)
---- @param opts table|nil  { stdin = string, env = table<string,string> } stdin
----   to feed the process and env merged into the inherited environment, the
----   same contract as M.run_cmd.
-function M.run_cmd_async(args, timeout_ms, callback, opts)
-  local t = timeout_ms or 30000
-  local watchdog
-  local delivered = false
-
-  -- Whichever of on_exit, the spawn failure and the watchdog gets here first
-  -- wins; the callback must run exactly once.
-  local function deliver(stdout, stderr, code)
-    if delivered then return end
-    delivered = true
-    if watchdog and not watchdog:is_closing() then
-      watchdog:stop()
-      watchdog:close()
-    end
-    callback(stdout, stderr, code)
-  end
-
-  watchdog = vim.defer_fn(function()
-    deliver(TIMED_OUT.stdout, TIMED_OUT.stderr, TIMED_OUT.code)
-  end, t + M._exit_grace_ms)
-
-  local sys_opts = {
-    text = true,
-    timeout = t,
-    stdin = opts and opts.stdin or nil,
-    env = opts and opts.env or nil,
-  }
-  local ok, err = pcall(vim.system, args, sys_opts, function(r)
-    vim.schedule(function()
-      deliver(r.stdout or "", timeout_stderr(r.stderr, r.code, t), r.code)
-    end)
-  end)
-  if not ok then
-    vim.schedule(function() deliver("", tostring(err), 1) end)
-  end
 end
 
 local SCHEME_MAP = {

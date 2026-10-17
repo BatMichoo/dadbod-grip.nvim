@@ -135,40 +135,6 @@ test("get_column_info / get_primary_keys handle quoted and composite", function(
   eq(pks[1], "tenant_id", "pk order")
 end)
 
-test("get_foreign_keys / get_indexes / get_table_stats / get_schema_batch", function()
-  local fks = pg.get_foreign_keys("order_items", URL)
-  eq(#fks, 2, "two FKs on order_items")
-
-  local idx = pg.get_indexes("users", URL)
-  assert(#idx >= 2, "pk + unique index")
-  eq(idx[1].type, "PRIMARY", "primary index first")
-
-  local stats = pg.get_table_stats("users", URL)
-  assert(stats and stats.size_bytes > 0, "size_bytes positive")
-
-  local batch = pg.get_schema_batch(URL)
-  assert(batch and batch["users"] and #batch["users"] == 5, "batch users columns")
-  assert(batch["Participant"], "batch includes quoted table")
-end)
-
-test("get_schema_batch: non-public schema qualified as schema.table", function()
-  local batch = pg.get_schema_batch(URL)
-  assert(batch, "batch must not be nil")
-
-  local cols = batch["admin.audit_log"]
-  assert(cols, "admin.audit_log present under its qualified name")
-  assert(batch["audit_log"] == nil, "and not under its bare name")
-  eq(#cols, 3, "column count")
-  eq(cols[1].column_name, "id", "column order")
-  eq(cols[2].data_type, "character varying(50)", "declared length")
-  eq(cols[2].is_nullable, "NO", "NOT NULL column")
-  eq(cols[3].is_nullable, "YES", "nullable column")
-
-  -- The same qualified key must work as a table name for per-table lookups.
-  eq(pg.get_primary_keys("admin.audit_log", URL)[1], "id", "pk via qualified name")
-  eq(#pg.get_column_info("admin.audit_log", URL), 3, "column info via qualified name")
-end)
-
 -- ── routines (PR #17) ──────────────────────────────────────────────────
 
 test("list_routines: functions, procedures, non-public schemas", function()

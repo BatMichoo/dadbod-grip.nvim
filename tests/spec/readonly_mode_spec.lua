@@ -355,28 +355,6 @@ end)
 -- things can strip it before the argv is built, and none of them was covered
 -- until a reviewer reproduced two of them by hand.
 
-test("the async path builds its argv while the mode is still published", function()
-  with_connections(nil, function(ro_sqlite, rw_sqlite)
-    vim.g.db = rw_sqlite  -- ambient rw: -readonly can only come from the URL
-    local adapters_mod = require("dadbod-grip.adapters")
-    local orig = adapters_mod.run_cmd_async
-    local seen
-    adapters_mod.run_cmd_async = function(args, _, cb)
-      seen = args
-      vim.schedule(function() cb("", "", 1) end)
-    end
-    local done = false
-    require("dadbod-grip.db").get_schema_batch_async(ro_sqlite, function() done = true end)
-    vim.wait(1000, function() return done end, 1)
-    adapters_mod.run_cmd_async = orig
-
-    assert(seen, "no async spawn happened")
-    assert(has_readonly(seen),
-      "the async argv is built after the callback is registered but before the call returns, "
-      .. "so it must still see the mode: " .. table.concat(seen, " "))
-  end)
-end)
-
 test("a db.* call landing inside a blocking spawn leaves the outer call's mode alone", function()
   with_connections(nil, function(ro_sqlite, rw_sqlite)
     vim.g.db = rw_sqlite

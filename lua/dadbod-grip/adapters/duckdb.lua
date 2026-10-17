@@ -171,7 +171,7 @@ end
 --- server becomes unreachable -- a restart, a dropped VPN -- the password
 --- comes back in the stderr of an ordinary SELECT and goes to vim.notify via
 --- view.lua. Applied inside the three functions that spawn the CLI with a
---- prefix (duckdb, duckdb_async, duckdb_exec), so no individual error-return
+--- prefix (duckdb, duckdb_exec), so no individual error-return
 --- site has to remember.
 --- @param msg string|nil
 --- @param url string|nil
@@ -560,26 +560,6 @@ get_catalog_set = function(db_path, url)
   return cats
 end
 
---- Non-blocking async variant: spawns DuckDB and calls callback(stdout, stderr, code)
---- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
-local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
-  local setup_sql = url and build_attach_prefix(url) or ""
-  local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
-  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
-  -- Same one-off extension fetch as in duckdb().
-  if url and attach_install_pending(url) then
-    effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
-  end
-  local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
-  adapters.run_cmd_async(args, effective_timeout, function(stdout, stderr, code)
-    if url then note_ext_installed(url, code) end
-    if has_setup then stdout = strip_csv_setup(stdout) end
-    -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
-    callback(stdout, redact_query_error(stderr, url), code)
-  end, { stdin = effective_sql })
-end
-
---- Run DML without CSV mode (to get change count output).
 local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
   local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
@@ -1337,8 +1317,8 @@ function M.attach(url, dsn, alias, template)
   test_sql = test_sql .. "SELECT 42;"
 
   -- Validate in-memory: avoids acquiring a write lock on the main db file.
-  -- If we opened db_path here, we'd race with list_tables / get_schema_batch_async
-  -- (both also open the same file), causing "Failed to lock file" on connection switch.
+  -- If we opened db_path here, we'd race with list_tables (which also opens
+  -- the same file), causing "Failed to lock file" on connection switch.
   local args = duckdb_args(":memory:", nil)
 
   local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout, { stdin = test_sql })
@@ -1399,123 +1379,6 @@ function M.load_attachments(url, attachments)
   end
 end
 
---- Build the schema batch SQL for get_schema_batch / get_schema_batch_async.
---- Always the same 8-column shape (rtype, database_name, schema_name, table_name,
---- column_name, data_type, is_nullable, column_index) sourced from duckdb_columns() /
---- duckdb_views() -- the exact tables get_column_info itself reads, so batch and
---- per-table fallback can never disagree on data_type/is_nullable formatting again.
---- 'col' rows = real columns. duckdb_columns() covers views too, as long as the
---- view lives in a DuckDB catalog -- verified on the CLI (v1.0.0 and v1.5.5):
---- a `CREATE VIEW v AS SELECT id, name, id*2 AS doubled` yields three 'col' rows
---- for v, the same three information_schema.columns used to return.
---- 'tbl' rows = view names, registered with column_index 0 so they sort first.
---- They are the only source for views in *attached non-DuckDB* catalogs, which
---- neither duckdb_columns() nor information_schema.columns knows the columns of
---- (also verified on the CLI, with a SQLite attachment); those views stay
---- name-only, exactly as before the two branches were unified.
---- Without attachments the scan is restricted to the main catalog (matches
---- get_column_info's main-catalog behavior exactly); with attachments it is left
---- unrestricted so duckdb_columns()/duckdb_views() also pick up attached catalogs.
---- column_index drives ORDER BY so a table's columns arrive in their real, stable
---- order -- UNION ALL alone gives no ordering guarantee within a group.
-local function _make_schema_batch_sql(has_attachments, main_catalog)
-  local catalog_filter = ""
-  if not has_attachments then
-    catalog_filter = string.format(" AND database_name = '%s'", esc(main_catalog))
-  end
-  return string.format([[
-    SELECT 'col' AS rtype, database_name, schema_name, table_name, column_name, data_type,
-           CASE WHEN is_nullable THEN 'YES' ELSE 'NO' END AS is_nullable,
-           column_index
-    FROM duckdb_columns()
-    WHERE internal = false%s
-    UNION ALL
-    SELECT 'tbl' AS rtype, database_name, schema_name, view_name, '', '', '', 0
-    FROM duckdb_views()
-    WHERE internal = false%s
-    ORDER BY 2, 3, 4, 8
-  ]], catalog_filter, catalog_filter)
-end
-
---- Parse CSV rows from _make_schema_batch_sql into the schema cache format.
---- Returns { [full_table_name] = [{column_name, data_type, is_nullable}] } or nil.
-local function _parse_schema_batch_rows(parsed, main_catalog)
-  if not parsed then return nil end
-  local tables = {}
-  -- 8-column rows: rtype, database_name, schema_name, table_name, col_name, data_type,
-  -- is_nullable, column_index. ORDER BY in _make_schema_batch_sql guarantees rows for
-  -- the same table arrive in column_index order, so table.insert below preserves it.
-  for _, row in ipairs(parsed.rows) do
-    local rtype       = row[1] or ""
-    local catalog     = row[2] or main_catalog
-    local schema_name = row[3] or "main"
-    local tname       = row[4] or ""
-    local full_name
-    if catalog == main_catalog then
-      full_name = (schema_name == "main") and tname or (schema_name .. "." .. tname)
-    else
-      -- Attached catalog: prefix with catalog alias (matches list_tables() output)
-      full_name = catalog .. "." .. tname
-    end
-    if rtype == "col" then
-      -- Column row from duckdb_columns() — covers both main catalog and attached catalogs.
-      local col_name  = row[5] or ""
-      local data_type = row[6] or ""
-      -- Nullability for attached catalogs mirrors get_column_info's attached-catalog
-      -- branch, which leaves it blank rather than trust duckdb_columns() there.
-      local is_nullable = (catalog == main_catalog) and (row[7] or "") or ""
-      tables[full_name] = tables[full_name] or {}
-      table.insert(tables[full_name], { column_name = col_name, data_type = data_type, is_nullable = is_nullable })
-    else
-      -- View row. Registers the name without touching an existing entry: views in
-      -- DuckDB catalogs already got their columns from duckdb_columns(), and this
-      -- row sorts first (column_index 0), so it must never replace them. Views in
-      -- attached non-DuckDB catalogs have no column source at all and stay empty.
-      tables[full_name] = tables[full_name] or {}
-    end
-  end
-  return tables
-end
-
---- Fetch all table columns in a single DuckDB query (O(1) CLI spawns).
---- Returns { [full_table_name] = [{column_name, data_type, is_nullable}] } or nil on error.
---- full_table_name matches list_tables() output:
----   main-schema tables      -> "employees"
----   native DuckDB schemas   -> "analytics.events"
----   attached catalogs       -> "supplier.orders"
-function M.get_schema_batch(url)
-  local db_path = extract_path(url)
-  if not db_path then return nil end
-
-  local has_attachments = _attachments[url] and #_attachments[url] > 0
-  local main_catalog = main_catalog_name(db_path)
-  local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
-
-  local stdout, _, code = duckdb(db_path, sql_str, nil, url)
-  if code ~= 0 then return nil end
-
-  return _parse_schema_batch_rows(db_util.parse_csv(stdout), main_catalog)
-end
-
---- Async variant: fetches schema batch without blocking. Calls callback(tables) when done.
---- Used for pre-warming the completion cache on connection switch / GripAttach.
-function M.get_schema_batch_async(url, callback)
-  local db_path = extract_path(url)
-  -- Deliver via vim.schedule even on this guard path: duckdb_async's own
-  -- callback always arrives via vim.schedule, and a caller must not be able
-  -- to tell a bad URL from a spawn failure by timing alone.
-  if not db_path then vim.schedule(function() callback(nil) end); return end
-
-  local has_attachments = _attachments[url] and #_attachments[url] > 0
-  local main_catalog = main_catalog_name(db_path)
-  local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
-
-  duckdb_async(db_path, sql_str, nil, url, function(stdout, _, code)
-    if code ~= 0 then callback(nil); return end
-    callback(_parse_schema_batch_rows(db_util.parse_csv(stdout), main_catalog))
-  end)
-end
-
 -- Exposed for testing
 --- Ping: memory instance is always reachable; file DBs require the file to be readable.
 function M.ping(url)
@@ -1538,7 +1401,6 @@ M._redact_attach_error = redact_attach_error
 M._redact_query_error = redact_query_error
 M._dsn_secret_keys = DSN_SECRET_KEYS
 M._unsupported_attach_scheme = unsupported_attach_scheme
-M._make_schema_batch_sql = _make_schema_batch_sql
 M._main_catalog_name = main_catalog_name
 M._nested_json_sql = nested_json_sql
 --- Drop the record of which scanners are installed. Test-only: the timeout a

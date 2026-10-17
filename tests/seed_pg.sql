@@ -419,7 +419,7 @@ $$;
 CREATE SCHEMA admin;
 
 -- A table outside the public schema, so that schema qualification in
--- list_tables / get_schema_batch ("admin.audit_log", not a bare "audit_log")
+-- list_tables ("admin.audit_log", not a bare "audit_log")
 -- has something to be tested against. The schema used to hold only a function.
 CREATE TABLE admin.audit_log (
   id     integer PRIMARY KEY,

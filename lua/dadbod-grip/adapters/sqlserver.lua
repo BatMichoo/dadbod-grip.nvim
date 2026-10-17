@@ -417,37 +417,6 @@ local function run_query(sql_str, url, timeout_ms)
   return parse_sqlcmd_table(stdout), nil
 end
 
---- Non-blocking twin of run_query: same argv, same output parser, same guards.
---- Delivers (result, err) to `callback` instead of returning them.
-local function run_query_async(sql_str, url, timeout_ms, callback)
-  -- Both guards below deliver via vim.schedule: run_cmd_async's contract is
-  -- that the callback never fires on the calling tick, and a caller must not
-  -- be able to tell a guard rejection from a spawn failure by that timing
-  -- difference.
-  if vim.fn.executable("sqlcmd") == 0 then
-    vim.schedule(function()
-      callback(nil, "sqlcmd not found. Install Microsoft sqlcmd tools.")
-    end)
-    return
-  end
-
-  local parsed, parse_err = parse_url(url)
-  if not parsed then
-    vim.schedule(function() callback(nil, parse_err) end)
-    return
-  end
-
-  adapters.run_cmd_async(sqlcmd_args(parsed),
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    function(stdout, stderr, code)
-      if code ~= 0 then
-        callback(nil, sqlcmd_error(stdout, stderr, code))
-        return
-      end
-      callback(parse_sqlcmd_table(stdout), nil)
-    end, { stdin = sqlcmd_stdin(normalize_query_sql(sql_str)), env = sqlcmd_env(parsed) })
-end
-
 function M.query(sql_str, url)
   local parsed, err = run_query(sql_str, url)
   if not parsed then return nil, err end
@@ -587,9 +556,7 @@ function M.get_referencing_foreign_keys(table_name, url)
   return db_util.group_referencing_fks(entries), nil
 end
 
---- The length/precision-suffixed data_type expression, interpolated into both
---- get_column_info and SCHEMA_BATCH_SQL so the two can never drift: callers must
---- get the same string whether a table came from the batch or a per-table call.
+--- The length/precision-suffixed data_type expression used by get_column_info.
 --- SQL Server reports CHARACTER_MAXIMUM_LENGTH = -1 for the MAX types
 --- (nvarchar(max), varbinary(max)), hence the dedicated arm ahead of the
 --- positive-length one.
@@ -716,51 +683,6 @@ function M.get_table_keys(table_name, url)
     end
   end
   return pks, fks, nil
-end
-
---- The one schema-batch statement, shared by get_schema_batch and
---- get_schema_batch_async so the two paths can never query different things.
---- data_type comes from the same DATA_TYPE_EXPR get_column_info uses.
-local SCHEMA_BATCH_SQL = string.format([[
-    SELECT
-      CASE WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME ELSE TABLE_SCHEMA + '.' + TABLE_NAME END AS table_name,
-      COLUMN_NAME,
-%s,
-      IS_NULLABLE
-    FROM INFORMATION_SCHEMA.COLUMNS
-    ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
-  ]], DATA_TYPE_EXPR)
-
---- Turn SCHEMA_BATCH_SQL's parsed rows into the completion cache format.
---- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
---- The single parser for both the blocking and non-blocking paths.
-local function parse_schema_batch(result)
-  if not result then return nil end
-  local tables = {}
-  for _, row in ipairs(result.rows) do
-    local tname = row[1] or ""
-    tables[tname] = tables[tname] or {}
-    table.insert(tables[tname], {
-      column_name = row[2] or "",
-      data_type = row[3] or "",
-      is_nullable = row[4] or "",
-    })
-  end
-  return tables
-end
-
-function M.get_schema_batch(url)
-  local result = run_query(SCHEMA_BATCH_SQL, url)
-  return parse_schema_batch(result)
-end
-
---- Async variant: same statement, same parser, non-blocking spawn.
---- Calls callback(tables), or callback(nil) when sqlcmd is missing or fails.
---- Used to pre-warm the completion cache on connection switch / GripAttach.
-function M.get_schema_batch_async(url, callback)
-  run_query_async(SCHEMA_BATCH_SQL, url, nil, function(result)
-    callback(parse_schema_batch(result))
-  end)
 end
 
 function M.get_indexes(table_name, url)

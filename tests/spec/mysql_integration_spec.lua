@@ -210,36 +210,6 @@ test("list_tables includes tables and marks views", function()
   eq(by_name["type_zoo"], "table", "type_zoo")
 end)
 
-test("get_schema_batch: keyed by table, types spelled as in the DDL", function()
-  local batch = my.get_schema_batch(URL)
-  assert(batch, "batch must not be nil")
-  assert(batch["users"] and #batch["users"] == 5, "users has 5 columns")
-  eq(batch["users"][2].column_name, "name", "column order follows ordinal_position")
-  eq(batch["users"][2].data_type, "varchar(100)", "declared length")
-  eq(batch["users"][2].is_nullable, "NO", "nullability")
-  eq(batch["users"][3].is_nullable, "YES", "nullable column")
-  assert(batch["no_pk_view"], "views are included")
-
-  -- COLUMN_TYPE, not a type rebuilt from DATA_TYPE + length/precision, which
-  -- used to render enum(7) / float(12) / tinytext(255) here.
-  local zoo = {}
-  for _, c in ipairs(batch["type_zoo"]) do zoo[c.column_name] = c.data_type end
-  eq(zoo["feeling"], "enum('happy','sad','neutral')", "enum value list")
-  eq(zoo["permissions"], "set('read','write','execute','admin')", "set value list")
-  eq(zoo["approx_float"], "float", "float carries no bogus precision")
-  eq(zoo["tiny_text"], "tinytext", "tinytext carries no bogus length")
-  eq(zoo["big_unsigned"], "bigint unsigned", "unsigned modifier kept")
-  eq(zoo["precise_num"], "decimal(10,4)", "decimal precision and scale")
-end)
-
-test("get_schema_batch_async: agrees with the blocking path", function()
-  local sync = my.get_schema_batch(URL)
-  local done, async
-  my.get_schema_batch_async(URL, function(t) async = t; done = true end)
-  assert(vim.wait(15000, function() return done end), "async callback must fire")
-  assert(vim.deep_equal(sync, async), "async batch must match the blocking one")
-end)
-
 test("get_column_info / get_primary_keys handle constraints and composites", function()
   local cols, err = my.get_column_info("users", URL)
   assert(cols, err)
