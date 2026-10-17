@@ -68,6 +68,10 @@ function M.build(hdr_line, leftcol, width, active_bp, badges, gutter)
   return table.concat(out) .. "%*"
 end
 
+-- VimResized is global, so one handler serves every grid; one per grid
+-- would pile up, a new one for each grid ever opened.
+local resize_group
+
 --- Keep the winbar in step with the cursor's column and the window's scroll.
 --- CursorMoved covers both in practice (horizontal scroll happens through
 --- reveal_col_edge on column motions), WinScrolled catches <C-e>/<C-y>/zz and
@@ -79,12 +83,17 @@ function M.setup(bufnr, ctx)
     buffer = bufnr,
     callback = function() update(bufnr) end,
   })
-  vim.api.nvim_create_autocmd("VimResized", {
-    group    = ctx.augroup,
-    callback = function()
-      if vim.api.nvim_buf_is_valid(bufnr) then update(bufnr) end
-    end,
-  })
+  if not resize_group then
+    resize_group = vim.api.nvim_create_augroup("DadbodGripStickyResize", { clear = true })
+    vim.api.nvim_create_autocmd("VimResized", {
+      group    = resize_group,
+      callback = function()
+        for b in pairs(require("dadbod-grip.view")._sessions) do
+          if vim.api.nvim_buf_is_valid(b) then update(b) end
+        end
+      end,
+    })
+  end
 end
 
 return M

@@ -228,5 +228,27 @@ test("no duplicate: the winbar stays blank while the real header is on screen", 
   cleanup()
 end)
 
+test("opening grids does not pile up VimResized handlers", function()
+  cleanup()
+  local function resize_handlers()
+    local n = 0
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ event = "VimResized" })) do
+      if au.group_name and au.group_name:match("^DadbodGrip") and au.group_name ~= "DadbodGripSchema" then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  for _ = 1, 3 do open_grid(); cleanup() end
+  local bufnr = open_grid()
+  eq(resize_handlers(), 1, "one shared handler")
+  -- the shared handler still reaches the open grid
+  local win = vim.fn.bufwinid(bufnr)
+  vim.wo[win].winbar = "stale"
+  vim.api.nvim_exec_autocmds("VimResized", {})
+  assert(vim.wo[win].winbar ~= "stale", "winbar not refreshed on resize")
+  cleanup()
+end)
+
 print("\nsticky_header_spec: " .. pass .. " passed, " .. fail .. " failed")
 if fail > 0 then os.exit(1) end
