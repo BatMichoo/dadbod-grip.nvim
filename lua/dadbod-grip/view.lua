@@ -1,11 +1,17 @@
--- view.lua: buffer rendering + keymaps.
--- One buffer per grip session. State in M._sessions[bufnr].
+-- view.lua: grid buffers. One buffer per grip session, state in
+-- M._sessions[bufnr]. This file opens and renders grids and wires their
+-- keymaps; the parts live under view/:
+--   render.lua     layout: lines and highlights for a session
+--   cells.lua      cursor <-> cell mapping, horizontal reveal
+--   winbar.lua     sticky header and badges        watch.lua  timed refresh
+--   floats.lua     Live SQL and info floats         help.lua   ? popup
+--   meta_views.lua Columns/Keys/Indexes/... views  fk_nav.lua FK jumps
+--   export.lua     export and yank                 keymaps_*.lua key groups
 
 local data    = require("dadbod-grip.data")
 local sql     = require("dadbod-grip.sql")
 local db      = require("dadbod-grip.db")
 local editor  = require("dadbod-grip.editor")
-local ui      = require("dadbod-grip.ui")
 
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
@@ -201,403 +207,25 @@ function M.apply_edit(bufnr, new_state)
   M.render(bufnr, new_state)
 end
 
--- ── live SQL float ──────────────────────────────────────────────────────
-function M._update_live_sql_float(session)
-  if not session.live_sql then return end
-  local st = session.state
-  if not st.table_name then return end
+local floats = require("dadbod-grip.view.floats")
+M._update_live_sql_float = floats._update_live_sql_float
+M._close_live_sql_float = floats._close_live_sql_float
+M.close_all_floats = floats.close_all_floats
 
-  -- Build content
-  local content_lines
-  if data.has_changes(st) then
-    local preview = sql.preview_staged(
-      st.table_name,
-      data.get_updates(st),
-      data.get_deletes(st),
-      data.get_inserts(st)
-    )
-    content_lines = {}
-    for line in (preview .. "\n"):gmatch("([^\n]*)\n") do
-      if line ~= "" then table.insert(content_lines, line) end
-    end
-  else
-    content_lines = { "-- stage changes to see live SQL" }
-  end
+local cells = require("dadbod-grip.view.cells")
+M.get_cell = cells.get_cell
+M._snap_col = cells._snap_col
+M._clamp_data_line = cells._clamp_data_line
+M._reveal_leftcol = cells._reveal_leftcol
+M._cell_end_byte = cells._cell_end_byte
+M._resolve_col_at = cells._resolve_col_at
+M._active_col_bp = cells._active_col_bp
 
-  local editor_cols = vim.o.columns
-  local max_line_w = 0
-  for _, l in ipairs(content_lines) do max_line_w = math.max(max_line_w, #l) end
-  local float_w = math.min(math.max(max_line_w + 4, 30), editor_cols - 10)
-  local float_h = math.min(#content_lines, 15)
+local winbar = require("dadbod-grip.view.winbar")
+M._update_winbar = winbar._update_winbar
+M.invalidate_mode_cache = winbar.invalidate_mode_cache
 
-  -- Reuse existing float or create new one
-  if session._live_sql_win and vim.api.nvim_win_is_valid(session._live_sql_win) then
-    -- Update buffer contents
-    vim.api.nvim_set_option_value("modifiable", true, { buf = session._live_sql_buf })
-    vim.api.nvim_buf_set_lines(session._live_sql_buf, 0, -1, false, content_lines)
-    vim.api.nvim_set_option_value("modifiable", false, { buf = session._live_sql_buf })
-    -- Resize if needed
-    vim.api.nvim_win_set_width(session._live_sql_win, float_w)
-    vim.api.nvim_win_set_height(session._live_sql_win, float_h)
-  else
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, content_lines)
-    vim.api.nvim_set_option_value("filetype", "sql", { buf = buf })
-    vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
-
-    local _ei = vim.o.eventignore
-    vim.o.eventignore = "all"
-    local win = vim.api.nvim_open_win(buf, false, {
-      relative = "editor",
-      row = math.max(0, vim.o.lines - float_h - 4),
-      col = math.max(0, editor_cols - float_w - 2),
-      width = float_w,
-      height = float_h,
-      style = "minimal",
-      border = ui.border(),
-      title = " Live SQL ",
-      title_pos = "center",
-      focusable = false,
-      zindex = 40,
-    })
-    vim.o.eventignore = _ei
-    session._live_sql_win = win
-    session._live_sql_buf = buf
-  end
-end
-
-function M._close_live_sql_float(session)
-  if session._live_sql_win and vim.api.nvim_win_is_valid(session._live_sql_win) then
-    vim.api.nvim_win_close(session._live_sql_win, true)
-  end
-  session._live_sql_win = nil
-  session._live_sql_buf = nil
-end
-
---- Close every grip-owned floating window.
---- Called at the start of every 1-9 surface keymap so pressing any number key
---- instantly dismisses open pickers / floats before the target surface opens.
---- @param session? table  grid session; may be nil (e.g. called from query pad)
-function M.close_all_floats(session)
-  if session then M._close_live_sql_float(session) end
-  -- er_diagram tracks its own window; close() is a no-op when nothing is open
-  pcall(function() require("dadbod-grip.er_diagram").close() end)
-  -- close any grip_picker floats (stamped with grip_owned_float at creation)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      local cfg = vim.api.nvim_win_get_config(win)
-      if cfg.relative ~= "" then
-        local buf = vim.api.nvim_win_get_buf(win)
-        if vim.b[buf] and vim.b[buf].grip_owned_float then
-          pcall(vim.api.nvim_win_close, win, true)
-        end
-      end
-    end
-  end
-end
-
--- ── cursor → cell mapping ─────────────────────────────────────────────────
--- M.get_cell(bufnr) → {row_idx, col_name, col_idx, value} | nil
-function M.get_cell(bufnr)
-  local session = M._sessions[bufnr]
-  if not session or not session._render then return nil end
-
-  local r = session._render
-  local st = session.state
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line_nr = cursor[1]  -- 1-based
-  local col_nr  = cursor[2]  -- 0-based byte offset
-
-  -- Data rows start at line 4 (title, header, sep) or 5 (with type row)
-  local data_start = r.data_start or 4
-  local data_end = data_start + #r.ordered - 1
-  if line_nr < data_start or line_nr > data_end then return nil end
-
-  local row_order_idx = line_nr - data_start + 1
-  local row_idx = r.ordered[row_order_idx]
-  if not row_idx then return nil end
-
-  -- Use cached byte positions from build_render
-  -- Iterate visible_columns so col_idx matches the rendered layout
-  local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-  local vis_cols = r.visible_columns or st.columns
-  if bp_row then
-    for i, col in ipairs(vis_cols) do
-      local bp = bp_row[col]
-      if bp and col_nr >= bp.start and col_nr <= bp.finish then
-        local value = data.effective_value(st, row_idx, col)
-        return {
-          row_idx = row_idx,
-          col_name = col,
-          col_idx = i,
-          value = value,
-        }
-      end
-    end
-    -- Cursor is on a separator or border -- snap to nearest LEFT column
-    local snap = M._snap_col(vis_cols, bp_row, col_nr)
-    if snap then
-      return {
-        row_idx  = row_idx,
-        col_name = snap.col_name,
-        col_idx  = snap.col_idx,
-        value    = data.effective_value(st, row_idx, snap.col_name),
-      }
-    end
-  end
-
-  return nil
-end
-
---- Pure helper: given visible columns, their byte positions, and a cursor byte offset,
---- return { col_name, col_idx } for the column the cursor belongs to.
---- Snaps LEFT (to the previous column) when cursor is in a separator region,
---- EXCEPT when the cursor is exactly one byte before a column start (last separator
---- byte): in that case snaps RIGHT to the next column. This ensures that actions
---- (edit, sort, filter) fire on the column the user is reaching toward, not the
---- one they left. Used by get_cell() and testable without vim state.
-function M._snap_col(vis_cols, bp_row, col_nr)
-  local best_col, best_idx = nil, nil
-  for i, col in ipairs(vis_cols) do
-    local bp = bp_row[col]
-    if bp then
-      if col_nr < bp.start then
-        -- Last separator byte (touching the column) → snap RIGHT to this column.
-        if col_nr == bp.start - 1 then
-          return { col_name = col, col_idx = i }
-        end
-        break  -- mid-separator: best_col (previous column) is the snap target
-      end
-      best_col, best_idx = col, i
-    end
-  end
-  if best_col then
-    return { col_name = best_col, col_idx = best_idx }
-  end
-  -- Cursor is before ALL columns → snap to first
-  local first = vis_cols[1]
-  if first and bp_row[first] then
-    return { col_name = first, col_idx = 1 }
-  end
-  return nil
-end
-
---- Clamp a buffer line to the data-row range [data_start, data_start + #ordered - 1].
---- The title/header/type/separator rows sit above this range and the footer/hint
---- line sits below it; visual-mode navigation reuses this so `G`/`j`/`k` stop at the
---- last data row instead of overshooting onto the footer (issue #20). Pure/testable.
-function M._clamp_data_line(r, line)
-  local ds = r.data_start or 4
-  local last = ds + #r.ordered - 1
-  if last < ds then last = ds end  -- empty result set: collapse to data_start
-  if line < ds then return ds end
-  if line > last then return last end
-  return line
-end
-
---- Compute the horizontal scroll offset (leftcol) needed to bring a column's
---- right edge into view. `$` (grid_col_last) puts the cursor at the start of the
---- last column, but Neovim's default sidescroll leaves a wide column's right edge
---- off-screen. Given the current leftcol, the window's text width, and the
---- column's display-column span [start_vcol, finish_vcol] (all 1-based; a display
---- column c is visible iff leftcol < c <= leftcol + textwidth), return the new
---- leftcol that seats the right edge at the window's right, keeping the column's
---- start visible when the column fits. `margin` reveals that many extra display
---- columns past finish_vcol so the trailing separator/border glyph (" ║" / " │ ")
---- is shown too, not just the cell data. Returns nil when no scroll is needed.
---- Pure/testable.
-function M._reveal_leftcol(leftcol, textwidth, start_vcol, finish_vcol, margin)
-  margin = margin or 0
-  if textwidth <= 0 then return nil end
-  local want = finish_vcol + margin                  -- reveal this far to the right
-  if want <= leftcol + textwidth then return nil end -- edge (incl. border) already visible
-  local target = want - textwidth              -- seat the right edge at the window's right
-  if target > start_vcol - 1 then              -- but never scroll the column's start off-screen
-    target = start_vcol - 1                     -- (column wider than the window: show the start)
-  end
-  if target < 0 then target = 0 end
-  if target == leftcol then return nil end
-  return target
-end
-
---- Map a cell's last byte to the START byte of the character it belongs to — the
---- furthest position a normal-mode cursor can actually reach in that cell. Cells
---- rendered with a trailing multibyte glyph (the … truncation marker or ·NULL·)
---- have bp.finish pointing mid-character; the cursor snaps to the glyph's start,
---- so `e` (grid_col_end) must compare against this instead of bp.finish or it
---- gets stuck re-seeking the same spot. `finish` is a 0-based byte offset.
---- Pure/testable.
-function M._cell_end_byte(line, finish)
-  local i = finish
-  local b = line:byte(i + 1)
-  while i > 0 and b and b >= 0x80 and b < 0xC0 do  -- UTF-8 continuation byte (10xxxxxx)
-    i = i - 1
-    b = line:byte(i + 1)
-  end
-  return i
-end
-
---- After the cursor has been placed on a column at byte span `bp` on line `lnum`,
---- scroll the window horizontally (if needed) so the column's right edge is
---- visible. Converts the byte span to display columns — grid lines contain
---- multibyte box-drawing chars, so bytes ≠ screen cells — and applies the offset
---- from M._reveal_leftcol via winrestview. No-op when the edge already fits.
-local function reveal_col_edge(win, buf, lnum, bp)
-  if not (win and bp) then return end
-  local line = vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or ""
-  local start_vcol = vim.fn.strdisplaywidth(line:sub(1, bp.start)) + 1
-  local finish_vcol = vim.fn.strdisplaywidth(line:sub(1, bp.finish + 1))
-  local wininfo = vim.fn.getwininfo(win)[1]
-  if not wininfo then return end
-  local textwidth = wininfo.width - wininfo.textoff
-  local vw = vim.fn.winsaveview()
-  -- +2: the trailing " ║" / " │ " border sits 2 display columns past the cell data
-  local new_leftcol = M._reveal_leftcol(vw.leftcol, textwidth, start_vcol, finish_vcol, 2)
-  if new_leftcol then
-    vw.leftcol = new_leftcol
-    vim.fn.winrestview(vw)
-  end
-end
-
--- ── winbar: sticky header + badges ───────────────────────────────────────
--- One writer for 'winbar'. The watch/write badges came first and keep the
--- right edge; the sticky column header (view/sticky_header.lua) fills the rest.
-
---- Rebuild the winbar for bufnr: sticky column header plus watch/write badges.
-function M._update_winbar(bufnr)
-  local session = M._sessions[bufnr]
-  if not session then return end
-  -- Find the window showing this buffer
-  local winid
-  for _, wid in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(wid) == bufnr then winid = wid; break end
-  end
-  if not winid or not vim.api.nvim_win_is_valid(winid) then return end
-
-  local badges = {}
-  -- The mode of the session's own connection, not the ambient one: a grid
-  -- outliving a :GripConnect must still say what it is connected to. Cached
-  -- on the session because this function runs on every CursorMoved while
-  -- current_mode() reads connections.json. Two things clear the cache, and
-  -- between them they cover everything that can change the answer:
-  -- M.render (requery, refresh) and M.invalidate_mode_cache,
-  -- which connections.switch calls.
-  if session._ro_mode == nil then
-    session._ro_mode =
-      require("dadbod-grip.connections").current_mode(session.url) == "ro"
-  end
-  if session._ro_mode then
-    table.insert(badges, { text = "RO", hl = "GripReadonly" })
-  end
-  if session.watch_ms then
-    local secs = session.watch_ms / 1000
-    local label = secs == math.floor(secs) and tostring(math.floor(secs)) .. "s" or tostring(secs) .. "s"
-    table.insert(badges, { text = "↺ " .. label, hl = "GripWatch" })
-  end
-  if session.write_mode then
-    table.insert(badges, { text = "✎ WRITE", hl = "ErrorMsg" })
-  end
-
-  local sticky = require("dadbod-grip.config").values.sticky_header ~= false
-  local view_state = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
-  -- Buffer line 2 IS the column-name row. While it is still on screen the winbar
-  -- would only show it a second time, so it goes blank instead of duplicating —
-  -- blank rather than unset, because unsetting drops the line and shifts the
-  -- whole grid by one row exactly when scrolling crosses this threshold.
-  --
-  -- The "does the whole grid fit" test is not redundant with the topline one: on
-  -- Neovim 0.10 a window that has not been drawn yet reports topline == the
-  -- cursor line (verified against v0.10.0, the CI baseline), which reads as
-  -- "scrolled" for a grid that cannot scroll at all. A buffer shorter than the
-  -- window always shows its header, whatever topline claims.
-  local fits_in_window =
-    vim.api.nvim_buf_line_count(bufnr) <= vim.api.nvim_win_get_height(winid)
-  local hdr_on_screen = fits_in_window or (view_state.topline or 1) <= 2
-  local hdr_line = sticky and not hdr_on_screen and session._render
-    and session._render.lines and session._render.lines[2] or nil
-  local bar
-  if hdr_line then
-    local wininfo = vim.fn.getwininfo(winid)[1]
-    -- A winbar spans the full window width, but the buffer text starts after the
-    -- gutter ('number', 'signcolumn', folds). textoff is that gutter: it comes
-    -- off the width AND goes back on as a leading indent, or the mirrored header
-    -- renders one gutter to the left of the columns it is labelling.
-    local textoff = wininfo and wininfo.textoff or 0
-    local width = wininfo and (wininfo.width - textoff) or 0
-    bar = require("dadbod-grip.view.sticky_header").build(
-      hdr_line, view_state.leftcol or 0, width,
-      M._active_col_bp(bufnr, winid), badges, textoff)
-  else
-    local parts = {}
-    for _, b in ipairs(badges) do
-      table.insert(parts, "%#" .. b.hl .. "#" .. b.text .. "%#Normal#")
-    end
-    bar = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
-    -- Hold the line open while the feature is on, so it neither appears nor
-    -- disappears as the header scrolls in and out of view.
-    if bar == "" and sticky then bar = " " end
-  end
-  pcall(function() vim.wo[winid].winbar = bar end)
-end
-
---- Drop every session's cached connection mode and redraw the winbars.
----
---- connections.switch() calls this: a switch changes what current_mode()
---- answers, for the connection being switched to and for any connection whose
---- session override it just cleared. The grid in the current window is
---- replaced by the welcome screen and takes its session with it, but a grid in
---- any other window survives -- the sidebar and the query pad both hold focus
---- at switch time, and a pinned grid is skipped by find_content_win() -- and
---- would otherwise keep rendering its stale badge off the cache until its next
---- requery. A badge that says RO on a writable connection is worse than none.
-function M.invalidate_mode_cache()
-  for bufnr, session in pairs(M._sessions) do
-    session._ro_mode = nil
-    if vim.api.nvim_buf_is_valid(bufnr) then M._update_winbar(bufnr) end
-  end
-end
-
---- Start a watch timer for bufnr at interval ms. Stops any existing timer.
-local function _start_watch(bufnr, ms)
-  local session = M._sessions[bufnr]
-  if not session then return end
-  -- Stop existing timer if any
-  if session.watch_timer then
-    pcall(function() session.watch_timer:stop(); session.watch_timer:close() end)
-    session.watch_timer = nil
-  end
-  session.watch_ms = ms
-  local timer = vim.uv.new_timer()
-  session.watch_timer = timer
-  timer:start(ms, ms, vim.schedule_wrap(function()
-    local s = M._sessions[bufnr]
-    if not s or not vim.api.nvim_buf_is_valid(bufnr) then
-      pcall(function() timer:stop(); timer:close() end)
-      return
-    end
-    -- Skip refresh when there are staged mutations pending
-    local staged = s.state and (
-      next(s.state.changes or {}) or
-      next(s.state.deleted or {}) or
-      next(s.state.inserted or {})
-    )
-    if staged then return end
-    if s.on_refresh then s.on_refresh(bufnr) end
-  end))
-  M._update_winbar(bufnr)
-end
-
---- Stop the watch timer for bufnr.
-local function _stop_watch(bufnr)
-  local session = M._sessions[bufnr]
-  if not session then return end
-  if session.watch_timer then
-    pcall(function() session.watch_timer:stop(); session.watch_timer:close() end)
-    session.watch_timer = nil
-  end
-  session.watch_ms = nil
-  M._update_winbar(bufnr)
-end
+local watch = require("dadbod-grip.view.watch")
 
 -- ── open ──────────────────────────────────────────────────────────────────
 -- Creates split, renders initial state, wires keymaps.
@@ -725,7 +353,7 @@ function M.open(state, url, query_sql, opts)
   -- Start watch timer if requested via opts; show badge for write/watch
   if (opts and opts.watch_ms) or (opts and opts.write) then
     vim.schedule(function()
-      if opts.watch_ms then _start_watch(bufnr, opts.watch_ms) end
+      if opts.watch_ms then watch.start(bufnr, opts.watch_ms) end
       M._update_winbar(bufnr)
     end)
   end
@@ -753,57 +381,6 @@ M._request_export_rows = export.request_export_rows
 M._write_export_file = export.write_export_file
 M.export_to_clipboard = export.export_to_clipboard
 M.do_export = export.do_export
-
--- ── focused info float helper ────────────────────────────────────────────
--- Opens a focused float with q/Esc to close. Caller stays in grip buffer.
-local function open_info_float(grip_win, lines, float_opts)
-  -- nvim_buf_set_lines requires each element to contain no \n.
-  -- Flatten any multi-line strings (e.g. cell values with embedded newlines).
-  local flat = {}
-  for _, l in ipairs(lines) do
-    for _, sub in ipairs(vim.split(tostring(l), "\n", { plain = true })) do
-      table.insert(flat, sub)
-    end
-  end
-
-  local max_w = 0
-  for _, l in ipairs(flat) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
-
-  local width = float_opts.width or math.min(math.max(max_w + 2, 30), 80)
-  local height = float_opts.height or math.min(#flat, 30)
-  local relative = float_opts.relative or "editor"
-
-  -- Editor-relative floats are centered by ui.info_float (row/col left nil).
-  local row, col
-  if relative == "cursor" then
-    row = float_opts.row or 1
-    col = float_opts.col or 0
-  end
-
-  -- Buffer is created here, not by info_float: filetype must be set before the
-  -- window exists so FileType autocmds see the same state as before.
-  local popup_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, flat)
-  if float_opts.filetype then
-    vim.api.nvim_set_option_value("filetype", float_opts.filetype, { buf = popup_buf })
-  end
-
-  local win = ui.info_float({
-    buf = popup_buf,
-    relative = relative,
-    row = row,
-    col = col,
-    width = width,
-    height = height,
-    title = float_opts.title or "",
-    title_pos = "center",
-    zindex = 50,
-  })
-
-  ui.dismiss_float({ win = win, buf = popup_buf, caller_win = grip_win, group = _ag })
-
-  return win, popup_buf
-end
 
 local meta_views = require("dadbod-grip.view.meta_views")
 M.switch_view = meta_views.switch_view
@@ -871,62 +448,6 @@ function M._column_set(bufnr)
     M.apply_edit(bufnr, new_state)
     vim.notify("Set " .. #row_indices .. " rows in " .. col_name, vim.log.levels.INFO)
   end, {})
-end
-
---- Resolve the byte-position map for any grid line, including the header and
---- the type-annotation row. Returns nil for lines past the rendered rows
---- unless `fallback` asks for the first data row (then the header) instead.
---- @param r table    session._render
---- @param line number  1-indexed buffer line
---- @param fallback? boolean
---- @return table|nil  map of column name -> { start, finish } byte offsets
-local function resolve_row_bp(r, line, fallback)
-  local ds = r.data_start or 4
-  local di = line - ds + 1
-  if di < 1 then
-    if ds == 5 and line == ds - 2 then return r.type_row_byte_positions end
-    return r.hdr_byte_positions
-  end
-  local bp = r.byte_positions and r.byte_positions[di]
-  if bp then return bp end
-  if fallback then
-    return (r.byte_positions and r.byte_positions[1]) or r.hdr_byte_positions
-  end
-  return nil
-end
-
---- Name of the column at (line, col_nr), resolved from whichever row the cursor
---- is on: a data row, the header, or the type-annotation row.
---- Always go through this rather than pairing _snap_col with hdr_byte_positions
---- by hand. The rows do not share byte offsets -- a type name truncated with "…"
---- spends 3 bytes on 1 display cell, so every column after it sits elsewhere in
---- the type row than in the header -- and four call sites open-coded that pairing
---- with three of them reading the header unconditionally, which resolved the
---- wrong column whenever the cursor was on the type row.
---- @return string|nil  column name, or nil without render state or columns
-function M._resolve_col_at(r, cols, line, col_nr)
-  if not r or not cols or #cols == 0 then return nil end
-  local ref_bp = resolve_row_bp(r, line, true)
-  if not ref_bp then return nil end
-  local snap = M._snap_col(cols, ref_bp, col_nr)
-  return snap and snap.col_name or nil
-end
-
---- Byte range of the cursor's column inside the header row, for the sticky
---- header to highlight. Defined here rather than next to M._update_winbar
---- because it needs resolve_row_bp, which is declared above.
---- @return table|nil  { start, finish } from hdr_byte_positions
-function M._active_col_bp(bufnr, winid)
-  local session = M._sessions[bufnr]
-  local r = session and session._render
-  if not r or not r.hdr_byte_positions then return nil end
-  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, winid)
-  if not ok then return nil end
-  -- fallback: on the border/footer lines, keep labelling the column the cursor
-  -- column falls in rather than dropping the highlight entirely.
-  local ref_bp = resolve_row_bp(r, cursor[1], true)
-  local snap = ref_bp and M._snap_col(r.visible_columns or {}, ref_bp, cursor[2]) or nil
-  return snap and r.hdr_byte_positions[snap.col_name] or nil
 end
 
 -- ── keymap wiring ─────────────────────────────────────────────────────────
@@ -1020,12 +541,12 @@ local function make_keymap_ctx(bufnr)
 
   -- File-local render/buffer helpers the sections call. Injected for the same
   -- reason as ctx.view: they are not part of the module's public surface.
-  ctx.open_info_float = open_info_float
-  ctx.resolve_row_bp  = resolve_row_bp
-  ctx.reveal_col_edge = reveal_col_edge
+  ctx.open_info_float = floats.open_info_float
+  ctx.resolve_row_bp  = cells.resolve_row_bp
+  ctx.reveal_col_edge = cells.reveal_col_edge
   ctx.update_winbar   = M._update_winbar
-  ctx.start_watch     = _start_watch
-  ctx.stop_watch      = _stop_watch
+  ctx.start_watch     = watch.start
+  ctx.stop_watch      = watch.stop
   ctx.augroup         = _ag
   ctx.col_hl_ns       = _col_hl_ns
   ctx.NULL_DISPLAY    = NULL_DISPLAY
