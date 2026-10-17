@@ -50,6 +50,7 @@ local pad_display = ui.pad_display
 --- One-line form of a cell value: a newline shows as ↵ and a tab as ⇥ (a raw
 --- tab's width depends on its column, which breaks the grid's alignment).
 local function one_line(v)
+  if not v:find("[\r\n\t]") then return v end
   return (v:gsub("\r\n", "\n"):gsub("\n", "↵"):gsub("\r", ""):gsub("\t", "⇥"))
 end
 
@@ -110,26 +111,39 @@ function M._distribute_slack(columns, widths, natural, configured_max, available
 end
 
 -- ── cell display formatting ───────────────────────────────────────────────
+-- NULL padded to each width seen; a grid has a handful of widths.
+local null_cells = {}
+local function null_cell(width)
+  local s = null_cells[width]
+  if not s then
+    s = pad_display(NULL_DISPLAY, width)
+    null_cells[width] = s
+  end
+  return s
+end
+
 local function format_cell(value, width, is_null_staged)
-  if is_null_staged or value == nil then
-    local s = pad_display(NULL_DISPLAY, width)
-    return s, "GripNull"
+  if is_null_staged or value == nil or value == "" then
+    return null_cell(width), "GripNull"
   end
   value = tostring(value)
-  if value:sub(1, #BINARY_PREFIX) == BINARY_PREFIX then
+  if value:byte(1) == 60 and value:sub(1, #BINARY_PREFIX) == BINARY_PREFIX then
     local s = pad_display(value, width, false)
     return s, "GripReadonly"
   end
-  local display = value ~= "" and one_line(value) or NULL_DISPLAY
-  local hl = value == "" and "GripNull" or nil
-  return pad_display(display, width), hl
+  -- Fast path: printable ASCII that fits needs neither one_line nor a width scan
+  if #value <= width and not value:find("[^\32-\126]") then
+    return value .. string.rep(" ", width - #value), nil
+  end
+  return pad_display(one_line(value), width), nil
 end
 
 --- Classify a cell value for conditional formatting.
 --- Returns hl_group string or nil. Only for clean, non-null cells.
 local function classify_cell(value, data_type)
   if value == nil or value == "" then return nil end
-  local val_lower = value:lower()
+  -- Every boolean spelling is at most 5 bytes; skip lower() for longer values
+  local val_lower = #value <= 5 and value:lower() or ""
 
   -- Boolean detection
   if data_type then
@@ -151,7 +165,8 @@ local function classify_cell(value, data_type)
   if num and num < 0 then return "GripNegative" end
 
   -- URLs and emails
-  if value:match("^https?://") or value:match("^[%w%.%-]+@[%w%.%-]+%.[%w]+$") then
+  if (value:find("://", 1, true) and value:match("^https?://"))
+      or (value:find("@", 1, true) and value:match("^[%w%.%-]+@[%w%.%-]+%.[%w]+$")) then
     return "GripUrl"
   end
 
