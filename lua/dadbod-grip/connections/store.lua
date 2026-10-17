@@ -48,7 +48,7 @@ end
 local function read_json_connections(path, source)
   if vim.fn.filereadable(path) == 0 then return {} end
   local raw = table.concat(vim.fn.readfile(path), "\n")
-  local ok, data = pcall(vim.fn.json_decode, raw)
+  local ok, data = pcall(vim.json.decode, raw)
   if not ok or type(data) ~= "table" then return {} end
   local result = {}
   for _, entry in ipairs(data) do

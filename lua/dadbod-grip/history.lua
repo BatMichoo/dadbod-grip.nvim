@@ -45,7 +45,7 @@ function M._read_all()
   local entries = {}
   for _, line in ipairs(lines) do
     if line ~= "" then
-      local ok, entry = pcall(vim.fn.json_decode, line)
+      local ok, entry = pcall(vim.json.decode, line)
       if ok and type(entry) == "table" then
         table.insert(entries, entry)
       end
@@ -82,7 +82,7 @@ function M._read_last()
   if vim.fn.filereadable(path) == 0 then return nil end
   local lines = vim.fn.readfile(path, "", -1)
   if #lines == 0 or lines[1] == "" then return nil end
-  local ok, entry = pcall(vim.fn.json_decode, lines[1])
+  local ok, entry = pcall(vim.json.decode, lines[1])
   if ok and type(entry) == "table" then return entry end
   return nil
 end

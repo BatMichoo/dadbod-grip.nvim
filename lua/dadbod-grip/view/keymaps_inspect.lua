@@ -9,6 +9,13 @@ local db     = require("dadbod-grip.db")
 
 local M = {}
 
+--- A cell value parsed as JSON, or nil when it is not JSON.
+local function decode_json(val)
+  if type(val) ~= "string" or val == "" then return nil end
+  local ok, decoded = pcall(vim.json.decode, val)
+  return ok and decoded or nil
+end
+
 --- Inspection floats: staged SQL preview/copy, table info and properties,
 --- column rename, cell explain, cell expand, row view, cell buffer, JSON
 --- tree, visual stack-inspect and two-row compare.
@@ -321,9 +328,8 @@ function M.setup(bufnr, ctx)
       local prefix = " " .. col .. pad .. "   "
       local start_line = #lines + 1
       -- JSON-aware display: try to pretty-print JSON/jsonb values
-      local json_ok, json_decoded = val and pcall(vim.fn.json_decode, val) or false, nil
-      if json_ok then json_decoded = vim.fn.json_decode(val) end
-      if json_ok and type(json_decoded) == "table" then
+      local json_decoded = decode_json(val)
+      if type(json_decoded) == "table" then
         local json_lines = view._json_to_lines(json_decoded)
         if json_lines and #json_lines > 0 then
           table.insert(lines, prefix .. json_lines[1])
@@ -460,9 +466,8 @@ function M.setup(bufnr, ctx)
         local val = data.effective_value(st, row_idx, col)
         local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
         local prefix = " " .. col .. pad .. "   "
-        local json_ok, json_decoded = val and pcall(vim.fn.json_decode, val) or false, nil
-        if json_ok then json_decoded = vim.fn.json_decode(val) end
-        if json_ok and type(json_decoded) == "table" then
+        local json_decoded = decode_json(val)
+        if type(json_decoded) == "table" then
           local jlines = view._json_to_lines(json_decoded)
           if jlines and #jlines > 0 then
             table.insert(lines, prefix .. jlines[1])

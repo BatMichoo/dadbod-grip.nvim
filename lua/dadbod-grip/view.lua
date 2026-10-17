@@ -362,7 +362,7 @@ function M.open(state, url, query_sql, opts)
 end
 
 -- ── JSON pretty-printer ──────────────────────────────────────────────────
--- Converts a decoded Lua value (from vim.fn.json_decode) into an indented
+-- Converts a decoded Lua value (from vim.json.decode) into an indented
 -- line table suitable for display floats and editor pre-fill.
 -- cell_buffer.pretty_lines is the single implementation; the depth cap keeps
 -- deeply nested payloads from flooding a float. Returns nil for nil input.

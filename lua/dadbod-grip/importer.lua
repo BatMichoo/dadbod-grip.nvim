@@ -5,10 +5,7 @@ local db = require("dadbod-grip.db")
 
 local M = {}
 
-local function is_list(value)
-  if vim.islist then return vim.islist(value) end
-  return vim.tbl_islist(value)
-end
+local is_list = vim.islist
 
 local function target_index(columns)
   local index = {}

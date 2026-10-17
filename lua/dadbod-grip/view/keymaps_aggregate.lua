@@ -160,13 +160,7 @@ function M.setup(bufnr, ctx)
     end
     local val = tostring(cell.value):match("^%s*(.-)%s*$")
     if val:match("^https?://") or val:match("^ftp://") then
-      if vim.ui.open then
-        vim.ui.open(val)
-      elseif vim.fn.has("mac") == 1 then
-        vim.fn.jobstart({ "open", val }, { detach = true })
-      else
-        vim.fn.jobstart({ "xdg-open", val }, { detach = true })
-      end
+      vim.ui.open(val)
     else
       vim.notify("Not a URL", vim.log.levels.INFO)
     end

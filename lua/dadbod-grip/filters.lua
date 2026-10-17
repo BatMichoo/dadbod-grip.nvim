@@ -22,7 +22,7 @@ function M._read_all()
   local path = filters_path()
   if vim.fn.filereadable(path) == 0 then return {} end
   local raw = table.concat(vim.fn.readfile(path), "\n")
-  local ok, data = pcall(vim.fn.json_decode, raw)
+  local ok, data = pcall(vim.json.decode, raw)
   if not ok or type(data) ~= "table" then return {} end
   return data
 end

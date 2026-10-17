@@ -386,7 +386,7 @@ local function do_edit(bufnr, cell, url)
   local initial_val = cell.value
   local is_json = false
   if initial_val and #initial_val > 1 then
-    local json_ok, json_decoded = pcall(vim.fn.json_decode, initial_val)
+    local json_ok, json_decoded = pcall(vim.json.decode, initial_val)
     if json_ok and type(json_decoded) == "table" then
       is_json = true
       local json_lines = view._json_to_lines and view._json_to_lines(json_decoded)

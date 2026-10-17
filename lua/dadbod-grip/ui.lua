@@ -19,6 +19,14 @@ local M = {}
 -- round-trip per character. That is the common case for a grid of numbers, ids
 -- and short labels, which is why it is worth a branch.
 --
+--- Display width of `s`. nvim_strwidth is the faster call but counts a tab or
+--- another control character as one cell, where the screen shows a tab
+--- expanded and ^A as two; strdisplaywidth handles strings that have them.
+local function display_width(s)
+  if s:find("[%z\1-\31\127]") then return vim.fn.strdisplaywidth(s) end
+  return vim.api.nvim_strwidth(s)
+end
+
 --- Truncate `s` to fit `width` display cells. When it doesn't fit and
 --- `ellipsize ~= false`, cuts to width - width(marker) cells and appends
 --- `marker` (default "…"); properties.lua/diff.lua use "~" to match their
@@ -30,7 +38,7 @@ function M.truncate_display(s, width, ellipsize, marker)
 
   local ascii = not s:find("[^\32-\126]")
 
-  local dw = ascii and #s or vim.fn.strdisplaywidth(s)
+  local dw = ascii and #s or display_width(s)
   if dw <= width then return s, dw end
 
   local ell = ellipsize ~= false and (marker or "…") or ""
@@ -49,9 +57,9 @@ function M.truncate_display(s, width, ellipsize, marker)
   else
     local parts = {}
     used = 0
-    for i = 0, vim.fn.strchars(s) - 1 do
-      local ch = vim.fn.strcharpart(s, i, 1)
-      local cw = vim.fn.strdisplaywidth(ch)
+    -- One UTF-8 character per match (a lead byte plus its continuation bytes)
+    for ch in s:gmatch("[%z\1-\127\192-\255][\128-\191]*") do
+      local cw = display_width(ch)
       if used + cw > target then break end
       parts[#parts + 1] = ch
       used = used + cw
@@ -392,8 +400,8 @@ local _spinner = nil
 ---
 --- The spinner (braille frames) animates during vim.system():wait() and
 --- vim.wait() calls inside fn() because both pump the libuv event loop.
---- eventignore="all" suppresses plugin autocmds (WinNew/BufNew) that add
---- 200-400ms overhead from noice/treesitter/nvim-cmp handlers.
+--- The float opens with noautocmd and closes under eventignore="all": plugin
+--- autocmds (WinNew/WinEnter) add 200-400ms from noice/treesitter/nvim-cmp.
 ---
 --- Calls nest: only the outermost one owns the float, and an inner call just
 --- relabels it for the duration of its own work. Closing the inner float would
@@ -438,15 +446,13 @@ function M.blocking(msg, fn)
   local w = math.min(vim.fn.strdisplaywidth(display) + 6, vim.o.columns - 4)
 
   -- Suppress plugin autocmds during float create to avoid 200-400ms overhead.
-  local ei = vim.o.eventignore
-  vim.o.eventignore = "all"
   local win = vim.api.nvim_open_win(buf, false, {
     relative = "editor", style = "minimal", border = M.border(),
     width    = w, height = 3,
     row      = math.floor((vim.o.lines   - 3) / 2),
     col      = math.floor((vim.o.columns - w) / 2),
+    noautocmd = true,
   })
-  vim.o.eventignore = ei
 
   -- Claimed only now: a nested call reaching this far would have had no float
   -- to borrow, and every one after it must find a live window to relabel.
@@ -479,8 +485,9 @@ function M.blocking(msg, fn)
   -- no spinner rather than one that is about to vanish.
   _spinner = nil
 
-  -- Close float, suppressing autocmds again.
-  ei = vim.o.eventignore
+  -- Close float, suppressing autocmds again (nvim_win_close has no
+  -- noautocmd option; both calls are pcall'd, so the option is always restored).
+  local ei = vim.o.eventignore
   vim.o.eventignore = "all"
   pcall(vim.api.nvim_win_close, win, true)
   pcall(vim.api.nvim_buf_delete, buf, { force = true })

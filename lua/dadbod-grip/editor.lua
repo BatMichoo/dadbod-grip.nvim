@@ -240,13 +240,7 @@ function M.open(prompt, initial_value, on_save, opts)
     local lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
     local val = table.concat(lines, "\n"):match("^%s*(.-)%s*$")
     if val:match("^https?://") or val:match("^ftp://") then
-      if vim.ui.open then
-        vim.ui.open(val)
-      elseif vim.fn.has("mac") == 1 then
-        vim.fn.jobstart({ "open", val }, { detach = true })
-      else
-        vim.fn.jobstart({ "xdg-open", val }, { detach = true })
-      end
+      vim.ui.open(val)
     else
       vim.notify("Not a URL", vim.log.levels.INFO)
     end

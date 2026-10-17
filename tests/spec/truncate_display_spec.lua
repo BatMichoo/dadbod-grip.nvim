@@ -229,14 +229,11 @@ test("ASCII input makes no per-character vim.fn calls", function()
   eq(calls, 0, "per-character vim.fn calls on the ASCII path")
 end)
 
-test("non-ASCII input still walks characters", function()
-  local real_strcharpart = vim.fn.strcharpart
-  local calls = 0
-  vim.fn.strcharpart = function(...) calls = calls + 1; return real_strcharpart(...) end
-  local ok, err = pcall(function() truncate_display("日本語テキストです", 6) end)
-  vim.fn.strcharpart = real_strcharpart
-  if not ok then error(err, 0) end
-  assert(calls > 0, "general path must still be used for multi-byte input")
+test("non-ASCII input is cut on character boundaries", function()
+  local out, w = truncate_display("日本語テキストです", 6)
+  eq(out, "日本…", "two wide characters and the marker")
+  eq(w, 5, "display width")
+  eq(vim.fn.strdisplaywidth(out), w, "reported width matches the screen")
 end)
 
 print(string.format("\ntruncate_display_spec: %d passed, %d failed", pass, fail))

@@ -40,12 +40,20 @@ function M.get()
   return vim.deepcopy(OPTS)
 end
 
+--- vim.validate over a { name = { value, validator, optional_or_message } }
+--- table. Neovim 0.11 deprecated that table form for a per-argument call;
+--- 0.10, which Grip still supports, only has the table form.
+local function validate(spec)
+  if vim.fn.has("nvim-0.11") == 0 then return vim.validate(spec) end
+  for name, v in pairs(spec) do
+    vim.validate(name, v[1], v[2], v[3])
+  end
+end
+
 --- Validate and store setup() options. Raises on an invalid value.
 function M.apply(opts)
   opts = opts or {}
-  -- Deliberately the old table form of vim.validate: the per-argument signature
-  -- (vim.validate("name", value, "type")) needs Neovim 0.11, we support 0.10.
-  vim.validate({
+  validate({
     limit         = { opts.limit,         "number",  true },
     max_col_width = { opts.max_col_width,  "number",  true },
     timeout       = { opts.timeout,        "number",  true },

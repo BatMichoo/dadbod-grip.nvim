@@ -53,8 +53,6 @@ function M._update_live_sql_float(session)
     vim.api.nvim_set_option_value("filetype", "sql", { buf = buf })
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
-    local _ei = vim.o.eventignore
-    vim.o.eventignore = "all"
     local win = vim.api.nvim_open_win(buf, false, {
       relative = "editor",
       row = math.max(0, vim.o.lines - float_h - 4),
@@ -67,8 +65,8 @@ function M._update_live_sql_float(session)
       title_pos = "center",
       focusable = false,
       zindex = 40,
+      noautocmd = true,
     })
-    vim.o.eventignore = _ei
     session._live_sql_win = win
     session._live_sql_buf = buf
   end
