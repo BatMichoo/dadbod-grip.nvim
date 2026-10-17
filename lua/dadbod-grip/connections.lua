@@ -729,21 +729,6 @@ function M.list()
     end
   end
 
-  -- Softrear Inc. Analyst Portal™: built-in demo, shown until dismissed or
-  -- until the user switches to it (after which it's persisted as a regular
-  -- file connection and `seen[demo_url]` suppresses this entry).
-  local hidden = data_dir .. "/softrear.hidden"
-  local demo_spec = require("dadbod-grip.demo").spec()
-  if demo_spec and vim.fn.filereadable(hidden) == 0 then
-    if not seen[demo_spec.url] then  -- suppress once persisted as a real connection
-      table.insert(all, {
-        name      = require("dadbod-grip.demo").label,
-        url       = demo_spec.url,
-        _is_demo  = true,
-      })
-    end
-  end
-
   return all
 end
 
@@ -1236,7 +1221,7 @@ function M.pick(opts)
     if opts.group then
       local members = {}
       for _, c in ipairs(fresh) do
-        if c.group == opts.group and not (c._builtin_id or c._is_demo) then
+        if c.group == opts.group and not (c._builtin_id) then
           table.insert(members, c)
         end
       end
@@ -1254,7 +1239,7 @@ function M.pick(opts)
     -- Folder rows carry _section_header so every action and on_delete skips them.
     local folders, folder_order, ungrouped = {}, {}, {}
     for _, c in ipairs(fresh) do
-      if c.group and not (c._builtin_id or c._is_demo) then
+      if c.group and not (c._builtin_id) then
         if not folders[c.group] then
           folders[c.group] = { name = c.group, url = "", _folder = c.group,
                                _count = 0, _section_header = true }
@@ -1271,7 +1256,7 @@ function M.pick(opts)
 
     local global_conns, project_conns, other_conns = {}, {}, {}
     for _, c in ipairs(fresh) do
-      if c._builtin_id or c._is_demo then
+      if c._builtin_id then
         table.insert(other_conns, c)
       elseif c.source == "global" then
         table.insert(global_conns, c)
@@ -1378,22 +1363,7 @@ function M.pick(opts)
       elseif c._local_file then
         M.switch(c.url, nil, "file")
       else
-        -- Lazy-seed the portal DB on first selection
-        if c._is_demo then
-          local demo, err = require("dadbod-grip.demo").prepare(false)
-          if not demo then
-            vim.notify("Grip: " .. err, vim.log.levels.ERROR)
-            return
-          end
-          -- Persist with name so MRU tracking works on every future selection.
-          M.switch(demo.url, c.name)
-          local ok
-          ok, err = require("dadbod-grip.demo").attach_supplier(demo)
-          if not ok then vim.notify("Grip: " .. err, vim.log.levels.WARN) end
-          if demo.supplier_error then vim.notify("Grip: " .. demo.supplier_error, vim.log.levels.WARN) end
-        else
-          M.switch(c.url, c.name, c.type)
-        end
+        M.switch(c.url, c.name, c.type)
       end
     end,
     on_delete = function(c, refresh_fn)
@@ -1403,15 +1373,6 @@ function M.pick(opts)
         if ui.confirm("Remove '" .. c.name .. "'? (y/N): ") then
           vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
           vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/" .. c._builtin_id .. ".hidden")
-          refresh_fn(build_picker_items())
-        end
-        return
-      end
-      -- Portal deletion: write a flag file so it never appears again
-      if c._is_demo then
-        if ui.confirm("Remove Softrear Portal? (y/N): ") then
-          vim.fn.mkdir(vim.fn.stdpath("data") .. "/grip", "p")
-          vim.fn.writefile({}, vim.fn.stdpath("data") .. "/grip/softrear.hidden")
           refresh_fn(build_picker_items())
         end
         return
@@ -1571,7 +1532,7 @@ function M.pick(opts)
           -- No global concept when connections_path override is active (single-file mode)
           if configured_connections_path() then return false end
           return not (c._new or c._temp or c._section_header or c._local_file
-                      or c._builtin_id or c._is_demo)
+                      or c._builtin_id)
               and c.source == "file"
         end,
         fn    = function(c)

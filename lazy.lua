@@ -10,7 +10,6 @@ return {
     optional = true,
     cmd = {
       "Grip",
-      "GripStart",
       "GripHome",
       "GripConnect",
       "GripSchema",

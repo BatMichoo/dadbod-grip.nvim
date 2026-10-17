@@ -104,10 +104,6 @@ seed-all: seed-pg seed-sqlite seed-mysql seed-duckdb
 # Regenerate test databases from seed SQL
 reseed: seed-sqlite seed-duckdb
 
-# Open Neovim connected to the Softrear Analyst Portal (seeds on first run)
-start:
-    nvim --cmd "set rtp^=." -c "GripStart"
-
 # Open Neovim with the plugin loaded from this directory
 dev:
     nvim --cmd "set rtp^=."

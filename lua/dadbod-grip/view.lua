@@ -2855,8 +2855,6 @@ function M.show_help(opts)
         "  gc / gC     connection picker (* ok  o unknown  x fail)",
         "  T           retest file connection health (in picker)",
         "  s           save local file as named connection (in picker)",
-        "  Softrear Inc. Analyst Portal\xe2\x84\xa2",
-        "  :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",
@@ -2910,8 +2908,6 @@ function M.show_help(opts)
         "  gc / gC     connection picker (* ok  o unknown  x fail)",
         "  T           retest file connection health (in picker)",
         "  s           save local file as named connection (in picker)",
-        "  Softrear Inc. Analyst Portal\xe2\x84\xa2",
-        "  :GripStart   Built-in case file (see docs/softrear-internal.md)",
         "",
         " ───────────────────────────────────────────",
         "",
@@ -2945,11 +2941,6 @@ function M.show_help(opts)
       elseif line:match("^%s+[─═]") then hadd(ln, "Comment")
       elseif line:find("\xe2\x86\xb3") then hadd(ln, "Comment")   -- ↳ continuation
       elseif line:find("Colors:")    then hadd(ln, "Comment")
-      elseif line:find("Softrear Inc. Analyst Portal", 1, true) then hadd(ln, "Special")
-      elseif line:find(":GripStart", 1, true) then
-        local s, e = line:find(":GripStart")
-        if s then hadd(ln, "Statement", s - 1, e) end
-        if e then hadd(ln, "Comment",   e, -1) end
       elseif line:match("^  %S") and not line:find("%s%s", 3) then  hadd(ln, "Title")
       elseif line:match("^  %S") then
         local key_end = line:find("%s%s", 3)

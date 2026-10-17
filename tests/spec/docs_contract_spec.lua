@@ -39,7 +39,6 @@ local readme = read("README.md")
 local help = read("doc/dadbod-grip.txt")
 local todo = read("TODO.md")
 local changelog = read("CHANGELOG.md")
-local walkthrough = read("demo/softrear-internal.md")
 local grid_help = read("lua/dadbod-grip/view.lua")
 local contributing = read("CONTRIBUTING.md")
 local security = read("SECURITY.md")
@@ -81,7 +80,7 @@ test("README keeps the onboarding command path", function()
   assert(not hero:find("<picture", 1, true), "README hero must use the fixed PNG")
   assert(hero:find("mascot.gif", 1, true), "README hero lost Chonk")
   assert(readme:find(contributors, 1, true), "README contributor block changed")
-  for _, name in ipairs({ "GripConnect", "GripStart", "Grip", "GripQuery" }) do
+  for _, name in ipairs({ "GripConnect", "Grip", "GripQuery" }) do
     assert(readme:find("`:" .. name, 1, true), "README onboarding missing :" .. name)
   end
 end)
@@ -141,8 +140,6 @@ test("onboarding and process-privacy claims match current behavior", function()
     assert(not text:find("--init-command", 1, true), name .. " still documents removed mysql argv setup")
   end
 
-  assert(readme:find("no database server or manual setup", 1, true), "README demo requirements")
-  assert(help:find("database server or manual setup", 1, true), "help demo requirements")
   assert(not readme:find("Only `db.lua` and adapters run shell commands", 1, true),
     "README still claims an incomplete process boundary")
 end)
@@ -173,51 +170,6 @@ test("clipboard import documentation keeps its staging boundary", function()
       "child commands retain normal shell argument visibility", 1, true),
       "import child-process boundary missing")
   end
-end)
-
-test("demo walkthrough uses cataloged keys and current data-source behavior", function()
-  local claims = {
-    qpad_execute = "`%s` to run it",
-    grid_profile = "`%s` to see the full",
-    grid_sort = "`%s` on any column",
-    grid_sort_stack = "`%s` to stack",
-    grid_col_stats = "`%s` shows severity statistics",
-    grid_filter_cell = "Press `%s` on a",
-    grid_edit = "with `%s`, navigate",
-    grid_row_view = "Press `%s` on any row",
-    grid_explain = "Press `%s` to inspect the query plan",
-    grid_fk_follow = "Press `%s` on any FK column",
-    grid_fk_referencing = "or `%s` on a referenced row",
-    grid_export_clip = "Press `%s`\n> to export",
-    editor_open_url = "press `%s`.",
-    grid_preview_sql = "Press `%s` to inspect both",
-    grid_undo = "press `%s` once",
-    grid_apply = "press `%s`;",
-    open_notebook = "Press `%s` from the query pad",
-    help = "Press `%s` from any surface",
-  }
-  for action, claim in pairs(claims) do
-    local key = assert(keymaps.defaults[action], "missing keymap action " .. action)
-    claim = claim:format(key)
-    assert(walkthrough:find(claim, 1, true),
-      "demo walkthrough missing current " .. action .. " claim " .. claim)
-  end
-
-  assert(walkthrough:find("full 505-roll investigation", 1, true), "DuckDB dataset size missing")
-  assert(walkthrough:find("compact 35-roll fixture", 1, true), "SQLite fallback size missing")
-  assert(walkthrough:find("193 comments in the unreviewed queue", 1, true),
-    "full unreviewed count drifted")
-  assert(walkthrough:find(":GripImport !printf", 1, true), "demo import exercise missing")
-  assert(walkthrough:find("Both rows appear with staged markers", 1, true),
-    "demo import exercise does not prove batch staging")
-  assert(walkthrough:find("https://jorypestorious.com/dadbod-grip-web/", 1, true),
-    "demo canonical documentation URL missing")
-  assert(not walkthrough:find("joryeugene.github.io/dadbod-grip-web", 1, true),
-    "demo retained obsolete documentation URL")
-  assert(not walkthrough:find(".grip/supplier_intel.db", 1, true),
-    "demo retained project-local supplier database")
-  assert(not walkthrough:find("Navigate between SQL blocks with `gn`", 1, true),
-    "demo retained false notebook navigation claim")
 end)
 
 test("query-pad and SQL Server temp-table scope stay accurate", function()

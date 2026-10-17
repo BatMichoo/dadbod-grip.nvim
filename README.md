@@ -44,7 +44,7 @@ Dadbod Grip requires Neovim 0.10 or newer and the command-line client for each d
 | DuckDB, local files, HTTP, or S3 | `duckdb` |
 | SQL Server | `sqlcmd` |
 
-The built-in demo requires either `duckdb` or `sqlite3`, but it requires no database server or manual setup. DuckDB loads the full dataset; SQLite provides a compact fallback. Install both CLIs to include the automatically attached supplier-federation chapter. Dadbod Grip has no required Lua dependencies. vim-dadbod-ui, completion plugins, SQL formatters, and AI providers are optional integrations.
+Dadbod Grip has no required Lua dependencies. vim-dadbod-ui, completion plugins, SQL formatters, and AI providers are optional integrations.
 
 ### Install with lazy.nvim
 
@@ -65,14 +65,6 @@ Restart Neovim, then check the clients available on your machine:
 ```vim
 :checkhealth dadbod-grip
 ```
-
-Open the disposable demo:
-
-```vim
-:GripStart
-```
-
-The demo recreates its database from the bundled seed each time, so edits cannot damage your own data.
 
 ### Connect to a database
 
@@ -125,7 +117,6 @@ These commands cover the normal path:
 | Command | Purpose |
 |---|---|
 | `:GripConnect` | Opens the connection picker and full workspace. |
-| `:GripStart` | Recreates and opens the built-in demo. |
 | `:Grip users` | Opens a table in an editable grid. |
 | `:Grip SELECT * FROM users` | Runs SQL and opens the result. |
 | `:GripQuery` | Opens the query pad. |
@@ -203,7 +194,6 @@ Lazy should show the local directory instead of a cached release. The developmen
 - Run `:help dadbod-grip` for the exhaustive in-editor manual.
 - Read the [website](https://jorypestorious.com/dadbod-grip-web/) for guided workflows.
 - Use [`keymaps.json`](keymaps.json) as the machine-readable catalog for persistent mappings.
-- Follow the [demo investigation](demo/softrear-internal.md) to explore the bundled database.
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before preparing a change.
 - Review [CHANGELOG.md](CHANGELOG.md) for shipped behavior.
 

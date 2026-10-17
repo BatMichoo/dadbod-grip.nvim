@@ -1570,7 +1570,6 @@ function M.open_welcome()
     "  Editable database grids, inside Neovim.",
     "",
     "  ── Start ───────────────────────────────────────",
-    "  :GripStart    demo database + notebook",
     "  :GripConnect  connect a database",
     "  ?             full keymap reference",
     "",
@@ -2360,41 +2359,6 @@ function M.setup(opts)
     end
   end, { nargs = "?", complete = "file",
          desc = "Open any data source (file, HTTPS, s3://) without saving" })
-
-  -- :GripStart: open the Softrear Analyst Portal directly
-  vim.api.nvim_create_user_command("GripStart", function()
-    local demo_module = require("dadbod-grip.demo")
-    local demo, err = demo_module.prepare(true)
-    if not demo then
-      vim.notify("Grip: " .. err, vim.log.levels.ERROR)
-      return
-    end
-    local connections = require("dadbod-grip.connections")
-    connections.switch(demo.url, demo_module.label)
-    local attached
-    attached, err = demo_module.attach_supplier(demo)
-    if not attached then vim.notify("Grip: " .. err, vim.log.levels.WARN) end
-    if demo.supplier_error then vim.notify("Grip: " .. demo.supplier_error, vim.log.levels.WARN) end
-
-    -- Load the demo notebook into the query pad.
-    -- Double-schedule: connections.switch opens the pad in its own vim.schedule;
-    -- we need to run after that has completed.
-    vim.schedule(function()
-      vim.schedule(function()
-        local md_files = vim.api.nvim_get_runtime_file("demo/softrear-internal.md", false)
-        if #md_files == 0 then return end
-        local qpad = require("dadbod-grip.query_pad")
-        qpad.open(demo.url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
-        local pad = qpad.get_pad_bufnr()
-        if not pad or not vim.api.nvim_buf_is_valid(pad) then return end
-        local lines = vim.fn.readfile(md_files[1])
-        vim.bo[pad].modifiable = true
-        vim.api.nvim_buf_set_lines(pad, 0, -1, false, lines)
-        vim.bo[pad].modified = false
-        vim.notify("Softrear Inc. Analyst Portal\xe2\x84\xa2  \xc2\xb7  F5 runs any SQL block", vim.log.levels.INFO)
-      end)
-    end)
-  end, { desc = "Open the Softrear Inc. Analyst Portal" })
 
   -- :GripHome: return to the welcome screen from anywhere
   vim.api.nvim_create_user_command("GripHome", function()

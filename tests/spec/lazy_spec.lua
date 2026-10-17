@@ -33,7 +33,7 @@ test("lazy.lua command triggers include every public Grip command", function()
   local cmd = specs[1].cmd
   assert(type(cmd) == "table", "cmd must be a command trigger list")
   for _, name in ipairs({
-    "Grip", "GripStart", "GripHome", "GripConnect", "GripSchema",
+    "Grip", "GripHome", "GripConnect", "GripSchema",
     "GripTables", "GripQuery", "GripSave", "GripLoad", "GripHistory",
     "GripProfile", "GripExplain", "GripDiff", "GripCreate",
     "GripDrop", "GripRename", "GripProperties", "GripExport", "GripAttach",
