@@ -217,39 +217,83 @@ local function sqlcmd_error(stdout, stderr, code)
   return "sqlcmd exited with code " .. tostring(code)
 end
 
+--- Parse sqlcmd's -W -s "\t" output: a header line, a line of dashes, then
+--- one line per row. Only the first result set is read.
+---
+--- A value holding a newline spans several output lines; with more than one
+--- column the row is joined back until it has all its tab separators. (With a
+--- single column there is nothing to count, so each line is a row.) A blank
+--- line where a row starts ends the result set: a row of two or more columns
+--- always contains a tab. The separator is recognised only right below the
+--- header, so a value of dashes stays a row. NULL arrives as the text NULL and
+--- becomes "", which the grid shows as NULL.
 local function parse_sqlcmd_table(raw)
   if not raw or raw == "" then
     return { columns = {}, rows = {} }
   end
 
-  local lines = {}
-  for line in raw:gmatch("[^\r\n]+") do
-    local trimmed = vim.trim(line)
-    if trimmed ~= "" and not trimmed:match("^%(%d+ rows? affected%)$") then
-      table.insert(lines, line)
-    end
+  local lines = vim.split((raw:gsub("\r\n", "\n")), "\n", { plain = true })
+  local function is_count(line)
+    return vim.trim(line):match("^%(%d+ rows? affected%)$") ~= nil
   end
-  if #lines == 0 then return { columns = {}, rows = {} } end
-
+  local function is_separator(line)
+    return line:find("-", 1, true) ~= nil and line:gsub("[\t %-]", "") == ""
+  end
   local function split(line)
     local fields = {}
     for field in (line .. "\t"):gmatch("([^\t]*)\t") do
-      field = vim.trim(field)
       if field == "NULL" then field = "" end
       table.insert(fields, field)
     end
     return fields
   end
+  local function tabs(line)
+    local _, n = line:gsub("\t", "")
+    return n
+  end
 
-  local columns = split(lines[1])
-  local rows = {}
-  for i = 2, #lines do
-    local sep_probe = lines[i]:gsub("[\t%s%-]", "")
-    if not (sep_probe == "" and lines[i]:find("-", 1, true)) then
-      local row = split(lines[i])
-      while #row < #columns do table.insert(row, "") end
-      table.insert(rows, row)
+  local header, first_row
+  for i = 1, #lines - 1 do
+    if lines[i] ~= "" and not is_count(lines[i]) and is_separator(lines[i + 1]) then
+      header, first_row = i, i + 2
+      break
     end
+  end
+  if not header then
+    -- No separator line: take the first line as the header, rows follow it.
+    for i, line in ipairs(lines) do
+      if vim.trim(line) ~= "" and not is_count(line) then
+        header, first_row = i, i + 1
+        break
+      end
+    end
+    if not header then return { columns = {}, rows = {} } end
+  end
+
+  local columns = split(lines[header])
+  local ncols = #columns
+  local rows = {}
+  local last = #lines
+  while last >= first_row and vim.trim(lines[last]) == "" do last = last - 1 end
+  local i = first_row
+  while i <= last do
+    local line = lines[i]
+    if is_count(line) then
+      -- "(N rows affected)" closes the result set
+      break
+    end
+    if line == "" and ncols > 1 then break end
+    if line == "" and i + 2 <= last and is_separator(lines[i + 2]) then break end
+    if ncols > 1 then
+      while tabs(line) < ncols - 1 and i < last do
+        i = i + 1
+        line = line .. "\n" .. lines[i]
+      end
+    end
+    local row = split(line)
+    while #row < ncols do table.insert(row, "") end
+    table.insert(rows, row)
+    i = i + 1
   end
 
   return { columns = columns, rows = rows }
