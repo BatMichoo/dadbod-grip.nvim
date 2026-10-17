@@ -290,7 +290,7 @@ Action names (stable API) with their defaults:
 
   Schema sidebar ~
   sidebar_open     = "<CR>"    sidebar_open_spl = "<S-CR>"
-  sidebar_select   = "s"
+  sidebar_select   = "s"       sidebar_execute  = "<F5>"
   sidebar_expand   = "l"       sidebar_collapse = "h"
   sidebar_expand_z = "zo"      sidebar_collap_z = "zc"
   sidebar_expand_all  = "L"    sidebar_collap_all  = "H"
@@ -862,10 +862,10 @@ As in SSMS's Object Explorer, an expanded table lists four folders:
   Constraints   constraint names and types
   Indexes       index names, types, and columns
 
-<CR> on a table expands or collapses it, and runs no query; `s` opens its
-records. Each folder runs one query the first time it is opened (on SQL
-Server, Keys reads primary and foreign keys together) and keeps the result
-until `r` refreshes the schema. <CR> on a folder or one of its items shows
+<CR> on a table expands or collapses it, and runs no query; `s` or <F5>
+opens its records. Each folder runs one query the first time it is opened
+(on SQL Server, Keys reads primary and foreign keys together) and keeps the
+result until `r` refreshes the schema. <CR> on a folder or one of its items shows
 the matching view in the grid: Columns, Foreign Keys, Constraints, or
 Indexes. A grid already showing that table only switches view; otherwise the
 table opens first. Press 3 in the grid to return to its records.

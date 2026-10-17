@@ -214,7 +214,8 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | Key | Action |
 |-----|--------|
 | `<C-p>` | Command palette (searchable action list) |
-| `<CR>` / `go` | Open table under cursor (plain) |
+| `<CR>` | Expand or collapse the table under cursor |
+| `s` / `<F5>` | Open the records of the table under cursor |
 | `gT` / `gt` | Pick table (picker) |
 | `gb` | Close sidebar |
 | `gq` | Load saved query into query pad |

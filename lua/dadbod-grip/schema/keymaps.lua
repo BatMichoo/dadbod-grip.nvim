@@ -74,6 +74,13 @@ function M.setup(url, ctx)
     if tbl then ctx.open_table(tbl, url) end
   end)
 
+  -- The run key: on a table row, run its SELECT like `s`. Anything else
+  -- (folders, columns, groups) has no query of its own, so it does nothing.
+  kmap("sidebar_execute", function()
+    local node = ctx.node_at_cursor(state)
+    if node and node.kind == "table" and not node.is_file then ctx.open_table(node.name, url) end
+  end)
+
   -- Open table in new split (explicit second grid)
   kmap("sidebar_open_spl", function()
     local node = ctx.node_at_cursor(state)

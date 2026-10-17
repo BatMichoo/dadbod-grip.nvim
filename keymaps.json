@@ -898,6 +898,14 @@
       "modes": ["n"]
     },
     {
+      "action": "sidebar_execute",
+      "default": "<F5>",
+      "description": "Opens the records of the table under the cursor; does nothing on other rows.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
       "action": "sidebar_open_spl",
       "default": "<S-CR>",
       "description": "Opens the table under the cursor in a new split.",
