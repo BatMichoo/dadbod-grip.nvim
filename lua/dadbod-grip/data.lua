@@ -99,6 +99,20 @@ function M.new(query_result)
   local pks = query_result.primary_keys or {}
   local table_name = query_result.table_name
   local readonly = (#pks == 0) or (table_name == nil) or query_result.readonly == true
+  -- Why the grid is read-only, for the messages edit keys show; nil if editable.
+  local readonly_reason, readonly_badge
+  if query_result.readonly == true then
+    readonly_reason, readonly_badge = "read-only connection", "read-only"
+  elseif table_name == nil then
+    readonly_reason = "the query is not a plain SELECT from one table"
+    readonly_badge = "read-only: query"
+  elseif #pks == 0 and query_result.pk_error then
+    readonly_reason = "primary key lookup failed: " .. tostring(query_result.pk_error)
+    readonly_badge = "read-only: PK lookup failed"
+  elseif #pks == 0 then
+    readonly_reason = "no primary key on " .. table_name
+    readonly_badge = "read-only: no PK"
+  end
   return {
     rows = deep_copy(query_result.rows or {}),
     columns = deep_copy(query_result.columns or {}),
@@ -111,7 +125,14 @@ function M.new(query_result)
     inserted = {},
     _next_insert_idx = #(query_result.rows or {}) + 1000,
     readonly = readonly,
+    readonly_reason = readonly_reason,
+    readonly_badge = readonly_badge,
   }
+end
+
+--- The message an edit key shows on a read-only grid.
+function M.readonly_message(state)
+  return "Read-only: " .. ((state and state.readonly_reason) or "no primary key detected")
 end
 
 -- M.add_change(state, row_idx, field, value) → State

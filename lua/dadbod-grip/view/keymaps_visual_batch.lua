@@ -37,7 +37,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     if not ctx.session_is_editable() then
-      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      require("dadbod-grip.view").notify_readonly()
       return
     end
     local cell = view.get_cell(bufnr)
@@ -65,7 +65,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     if not ctx.session_is_editable() then
-      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      require("dadbod-grip.view").notify_readonly()
       return
     end
     local row_indices = get_visual_rows()
@@ -87,7 +87,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     if not ctx.session_is_editable() then
-      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      require("dadbod-grip.view").notify_readonly()
       return
     end
     local cell = view.get_cell(bufnr)

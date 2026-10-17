@@ -269,6 +269,25 @@ local function select_editable_table(sql_text, adapter_kind)
   if tokens[pos] and (tokens[pos].upper == "DISTINCT" or tokens[pos].upper == "ALL") then
     pos = pos + 1
   end
+  -- SQL Server's row cap, as SSMS writes it: TOP 100 / TOP (100) [PERCENT]
+  -- [WITH TIES]. It limits rows, never changes where the columns come from.
+  if adapter_kind == "sqlserver" and tokens[pos] and tokens[pos].upper == "TOP" then
+    pos = pos + 1
+    local t = tokens[pos]
+    if t and t.kind == "literal" then
+      pos = pos + 1
+    elseif t and t.kind == "(" and tokens[pos + 1] and tokens[pos + 1].kind == "literal"
+        and tokens[pos + 2] and tokens[pos + 2].kind == ")" then
+      pos = pos + 3
+    else
+      return nil
+    end
+    if tokens[pos] and tokens[pos].upper == "PERCENT" then pos = pos + 1 end
+    if tokens[pos] and tokens[pos].upper == "WITH"
+        and tokens[pos + 1] and tokens[pos + 1].upper == "TIES" then
+      pos = pos + 2
+    end
+  end
   local function consume_item()
     local parts = {}
     while pos < from do

@@ -8,6 +8,7 @@ local function make_state(overrides)
     primary_keys = overrides.primary_keys or { "id" },
     table_name = overrides.table_name,  -- nil means no table_name (readonly)
     url = "postgresql://localhost/test",
+    pk_error = overrides.pk_error,
   }
   -- Default table_name to "users" unless explicitly set to nil
   if overrides.table_name == nil and not overrides.no_table_name then
@@ -46,6 +47,16 @@ end)
 test("new: readonly when no PKs", function()
   local st = make_state({ primary_keys = {} })
   eq(st.readonly, true, "should be readonly")
+end)
+
+test("new: read-only message names the reason", function()
+  eq(data.readonly_message(make_state({ primary_keys = {} })),
+    "Read-only: no primary key on users", "table without a key")
+  eq(data.readonly_message(make_state({ primary_keys = {}, pk_error = "Login timeout" })),
+    "Read-only: primary key lookup failed: Login timeout", "lookup error")
+  eq(data.readonly_message(make_state({ no_table_name = true })),
+    "Read-only: the query is not a plain SELECT from one table", "no source table")
+  eq(make_state({}).readonly_reason, nil, "editable grid has no reason")
 end)
 
 test("new: editable when PKs present", function()

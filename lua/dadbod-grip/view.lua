@@ -813,6 +813,12 @@ local fk_nav = require("dadbod-grip.view.fk_nav")
 M._sync_pad = fk_nav._sync_pad
 M._fk_referencing = fk_nav._fk_referencing
 
+--- Tell the user why an edit key did nothing on the current read-only grid.
+function M.notify_readonly(bufnr)
+  local session = M._sessions[bufnr or vim.api.nvim_get_current_buf()]
+  vim.notify(data.readonly_message(session and session.state), vim.log.levels.INFO)
+end
+
 -- ── multi-cursor column set ───────────────────────────────────────────────
 --- Stage the same value for the current column across ALL visible rows of the
 --- visible rows (bulk-edit a status field without SQL or a visual selection).
@@ -824,7 +830,7 @@ function M._column_set(bufnr)
   local session = M._sessions[bufnr]
   if not session or not session._render then return end
   if not is_editable(session) then
-    vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+    M.notify_readonly()
     return
   end
   local cell = M.get_cell(bufnr)
@@ -1056,7 +1062,7 @@ local function make_keymap_ctx(bufnr)
     local session = ctx.session()
     if not session then return end
     if not ctx.session_is_editable() then
-      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      M.notify_readonly()
       return
     end
     local cell = M.get_cell(bufnr)

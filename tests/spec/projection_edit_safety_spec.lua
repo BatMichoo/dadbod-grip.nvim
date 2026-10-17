@@ -162,6 +162,16 @@ WHERE 'C:\data\orders' = 'C:\data\orders'
   assert_edit_targets(session, "user")
 end)
 
+test("SQL Server SELECT TOP n stays editable", function()
+  local pick = require("dadbod-grip.editable_source").select_editable_table
+  eq(pick("SELECT TOP 100 * FROM dbo.Users", "sqlserver"), "dbo.Users", "TOP n")
+  eq(pick("SELECT TOP (50) PERCENT WITH TIES id, name FROM [dbo].[Users] ORDER BY id",
+    "sqlserver"), "dbo.Users", "TOP (n) PERCENT WITH TIES")
+  eq(pick("SELECT DISTINCT TOP 5 name FROM Users", "sqlserver"), "Users", "DISTINCT TOP")
+  eq(pick("SELECT TOP @n * FROM Users", "sqlserver"), nil, "variable cap is not parsed")
+  eq(pick("SELECT TOP 10 * FROM Users", "postgresql"), nil, "TOP is SQL Server only")
+end)
+
 cleanup_grids()
 vim.fn.delete(fixture)
 

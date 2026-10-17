@@ -251,7 +251,7 @@ test("column set: read-only grid notifies and never opens the editor", function(
   eq(info.called, false, "editor not opened on read-only grid")
   local found
   for _, m in ipairs(msgs) do
-    if m:find("Read-only: no primary key detected", 1, true) then found = m end
+    if m:find("Read-only: no primary key on no_pk", 1, true) then found = m end
   end
   truthy(found, "read-only notify (same text as sibling actions)")
   eq(data.count_staged(view._sessions[bufnr].state), 0, "nothing staged")
