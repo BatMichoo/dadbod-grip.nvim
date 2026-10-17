@@ -270,10 +270,22 @@ function M.open(arg, url, opts)
   -- Opening a table is the SELECT (plus the primary keys, for editing) and
   -- nothing else: no COUNT(*) and no column-type lookup, each of which is one
   -- more round-trip -- a whole login, for sqlcmd.
+  -- opts.metadata_view: a sidebar folder (Keys, Columns, ...) asks about the
+  -- table, not its rows. Open an empty grid on that view and leave the SELECT
+  -- for when the user switches to the records.
+  local records_pending = opts and type(opts.metadata_view) == "string"
+    and table_name_arg ~= nil and not file_path
   local fetched
-  ui.blocking("  querying " .. short_label .. "...", function()
-    fetched = fetch_refresh(conn, query_sql, table_name_arg)
-  end)
+  if records_pending then
+    fetched = { elapsed_ms = 0, result = {
+      columns = {}, rows = {}, primary_keys = {}, readonly = db.is_readonly(conn),
+      table_name = table_name_arg, url = conn, sql = query_sql,
+    } }
+  else
+    ui.blocking("  querying " .. short_label .. "...", function()
+      fetched = fetch_refresh(conn, query_sql, table_name_arg)
+    end)
+  end
 
   local result = fetched.result
   if not result then
@@ -283,8 +295,10 @@ function M.open(arg, url, opts)
   local elapsed_ms = fetched.elapsed_ms
   result.elapsed_ms = elapsed_ms
 
-  local history = require("dadbod-grip.history")
-  history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query", elapsed_ms = elapsed_ms })
+  if not records_pending then
+    local history = require("dadbod-grip.history")
+    history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query", elapsed_ms = elapsed_ms })
+  end
 
   local state = data.new(result)
 
@@ -304,13 +318,14 @@ function M.open(arg, url, opts)
   -- Skip when the query originated from the pad itself (from_pad=true): the SQL is
   -- already there and we must not clobber the user's buffer.
   vim.schedule(function()
-    if opts and opts.from_pad then return end
+    if (opts and opts.from_pad) or records_pending then return end
     require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec, db.kind(conn)))
   end)
 
   -- Store the query spec on the session
   local session = view._sessions[bufnr]
   if session then
+    session.records_pending = records_pending or nil
     -- For file-as-table, store the file path so the schema sidebar can show columns
     if file_path then session.file_path = file_path end
     -- Handed to view.open() above and already on the session; the assignment
@@ -409,8 +424,10 @@ function M.open(arg, url, opts)
     end,
   })
 
+  if records_pending then
+    view.switch_view(bufnr, opts.metadata_view)
   -- Switch to a specific view if requested via opts.view (view name string)
-  if opts and type(opts.view) == "string" then
+  elseif opts and type(opts.view) == "string" then
     local view_name = opts.view
     vim.schedule(function()
       view.switch_view(bufnr, view_name)

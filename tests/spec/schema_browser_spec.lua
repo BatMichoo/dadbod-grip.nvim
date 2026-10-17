@@ -35,7 +35,7 @@ local function with_browser(fn, catalog)
   db.get_constraints=function() meta[#meta+1]="constraints";return {{name="ck_positive",type="CHECK"}} end
   db.query=function(sql) queries[#queries+1]=sql;return {rows={{"1"}}} end
   db.get_routine_source=function(id) sources[#sources+1]=id;return "SELECT '"..id.."';" end
-  grip.open=function(name)opened[#opened+1]=name end
+  grip.open=function(name,_,o)opened[#opened+1]=name;opened.opts=o end
   local url=catalog and catalog.url or "postgresql://synthetic.invalid/sidebar"
   schema.toggle(url)
   local st=schema.get_state(url)
@@ -180,10 +180,11 @@ test("Enter on a folder shows that view in the grid",function()
     local ok,err=pcall(function()
       b.press("L");b.select("table",long_name);b.press("l")
 
-      -- No grid on that table yet: the table opens first
+      -- No grid on that table yet: a grid opens on the view, without the rows
       view.find_content_win=function() return nil end
       b.select("facet","Indexes");b.press("<CR>")
       assert(b.opened[1]==long_name,"table was not opened")
+      assert(b.opened.opts and b.opened.opts.metadata_view=="indexes","rows were queried for a folder")
 
       -- A grid already on the table: only the view changes
       vim.api.nvim_set_current_win(b.win)

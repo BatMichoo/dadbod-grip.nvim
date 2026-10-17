@@ -382,7 +382,8 @@ end
 
 --- Show a table's metadata view (columns, fk, constraints, indexes) in the
 --- grid, as selecting a folder in SSMS's Object Explorer does. A grid already
---- on that table just switches view; otherwise the table opens first.
+--- on that table just switches view; otherwise a grid opens on the view alone,
+--- and the rows are queried only when the user switches to the records.
 local function open_table_view(table_name, url, view_name)
   local view_mod = require("dadbod-grip.view")
   local win = find_right_win()
@@ -391,9 +392,10 @@ local function open_table_view(table_name, url, view_name)
   if session and session.url == url and session.state and session.state.table_name == table_name then
     vim.api.nvim_set_current_win(win)
   else
-    open_table(table_name, url)
-    buf = vim.api.nvim_get_current_buf()
-    session = view_mod._sessions[buf]
+    -- The folder's metadata only: no SELECT of the rows, no pad sync
+    if win then vim.api.nvim_set_current_win(win) end
+    require("dadbod-grip").open(table_name, url, { reuse_win = win, metadata_view = view_name })
+    return
   end
   if session and (session.current_view or "records") ~= view_name then
     view_mod.switch_view(buf, view_name)

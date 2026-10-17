@@ -257,6 +257,19 @@ function M.switch_view(bufnr, view_name, opts)
       session.view_cache[old_cv] = { cursor = vim.api.nvim_win_get_cursor(win) }
     end
     session.current_view = "records"
+    -- Opened from a sidebar folder: the rows were never fetched. Run the
+    -- SELECT now, and show it in the pad as opening the table would have.
+    if session.records_pending then
+      session.records_pending = nil
+      session._meta_state = nil
+      update_buf_name(bufnr, table_name, nil)
+      if session.on_refresh then session.on_refresh(bufnr) end
+      if session.query_spec then
+        require("dadbod-grip.query_pad").sync_query(require("dadbod-grip.query")
+          .clean_sql(session.query_spec, require("dadbod-grip.db").kind(url)))
+      end
+      return
+    end
     -- _records_state always holds the canonical records data
     local real_state = session._records_state or session.state
     view().render(bufnr, real_state)
@@ -364,6 +377,7 @@ end
 --- them under the metadata view's badge.
 function M.apply_records(bufnr, state)
   local session = view()._sessions[bufnr]
+  if session then session.records_pending = nil end
   local cv = session and session.current_view
   if cv and cv ~= "records" then
     session.state = state
