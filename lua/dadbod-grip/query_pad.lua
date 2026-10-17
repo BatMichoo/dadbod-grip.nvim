@@ -11,6 +11,17 @@ local _pad_bufnr = nil
 -- or authored (keep it, append below). nil = no auto-sync to reclaim.
 local _last_synced = nil
 
+-- The pad is a scratch buffer: never block quitting Neovim on its edits.
+-- ExitPre runs before :qa/:q check for modified buffers; tab close never checks.
+vim.api.nvim_create_autocmd("ExitPre", {
+  group = _ag,
+  callback = function()
+    if _pad_bufnr and vim.api.nvim_buf_is_valid(_pad_bufnr) then
+      vim.bo[_pad_bufnr].modified = false
+    end
+  end,
+})
+
 --- True for the pad's hint comment, "-- <run key>:run block or buffer  ...".
 --- Matched on its shape rather than one key: the hint shows the configured
 --- qpad_execute key, and pads written with the old <C-CR> default still count.

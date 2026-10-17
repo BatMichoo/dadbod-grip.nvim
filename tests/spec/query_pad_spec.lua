@@ -398,5 +398,15 @@ do
   close_win(w)
 end
 
+-- ── quitting Neovim never asks to save the pad ──────────────────────────────
+
+do
+  local b = make_pad()
+  set_lines(b, { "SELECT 1" })
+  vim.bo[b].modified = true
+  vim.api.nvim_exec_autocmds("ExitPre", {})
+  eq(vim.bo[b].modified, false, "ExitPre clears the pad's modified flag")
+end
+
 print(string.format("\nquery_pad_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
