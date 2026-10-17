@@ -19,12 +19,15 @@ local M = {}
 -- round-trip per character. That is the common case for a grid of numbers, ids
 -- and short labels, which is why it is worth a branch.
 --
---- Display width of `s`. nvim_strwidth is the faster call but counts a tab or
---- another control character as one cell, where the screen shows a tab
---- expanded and ^A as two; strdisplaywidth handles strings that have them.
-local function display_width(s)
-  if s:find("[%z\1-\31\127]") then return vim.fn.strdisplaywidth(s) end
-  return vim.api.nvim_strwidth(s)
+--- Display width of one character. nvim_strwidth is the faster call but
+--- counts a tab or another control character as one cell, where the screen
+--- shows a tab expanded and ^A as two; strdisplaywidth handles those.
+--- (For a whole string strdisplaywidth stays: scanning it for control
+--- characters first costs more than nvim_strwidth saves.)
+local function char_width(ch)
+  local b = ch:byte(1)
+  if b < 32 or b == 127 then return vim.fn.strdisplaywidth(ch) end
+  return vim.api.nvim_strwidth(ch)
 end
 
 --- Truncate `s` to fit `width` display cells. When it doesn't fit and
@@ -38,7 +41,7 @@ function M.truncate_display(s, width, ellipsize, marker)
 
   local ascii = not s:find("[^\32-\126]")
 
-  local dw = ascii and #s or display_width(s)
+  local dw = ascii and #s or vim.fn.strdisplaywidth(s)
   if dw <= width then return s, dw end
 
   local ell = ellipsize ~= false and (marker or "…") or ""
@@ -59,7 +62,7 @@ function M.truncate_display(s, width, ellipsize, marker)
     used = 0
     -- One UTF-8 character per match (a lead byte plus its continuation bytes)
     for ch in s:gmatch("[%z\1-\127\192-\255][\128-\191]*") do
-      local cw = display_width(ch)
+      local cw = char_width(ch)
       if used + cw > target then break end
       parts[#parts + 1] = ch
       used = used + cw
