@@ -31,6 +31,32 @@ end
 
 local classify = view._classify_cell
 
+test("column highlight covers the header row and the data rows", function()
+  cleanup()
+  local st = data.new({
+    columns = { "id", "name" },
+    rows = { { "1", "alice" }, { "2", "bob" } },
+    primary_keys = { "id" },
+    table_name = "users",
+    url = "sqlite:test.db",
+  })
+  local bufnr = view.open(st, st.url, "users", {})
+  local r = view._sessions[bufnr]._render
+  vim.api.nvim_win_set_cursor(0, { r.data_start, r.byte_positions[1].name.start })
+  vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
+
+  local ns = vim.api.nvim_create_namespace("grip_col_hl")
+  local rows = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})) do
+    rows[m[2] + 1] = m[3]
+  end
+  eq(rows[r.hdr_row], r.hdr_byte_positions.name.start, "header cell of the column")
+  eq(rows[r.data_start], r.byte_positions[1].name.start, "first data row")
+  eq(rows[r.data_start + 1], r.byte_positions[2].name.start, "second data row")
+  eq(rows[r.hdr_row - 1], nil, "title row untouched")
+  cleanup()
+end)
+
 -- ── display width padding/truncation ────────────────────────────────────────
 
 test("format_cell: pads Korean text to exact display width", function()
