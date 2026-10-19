@@ -64,6 +64,35 @@ test("indents OR in WHERE clause on new line", function()
   has(out, "\n  OR")
 end)
 
+-- ── DECLARE and data type names ────────────────────────────────────────────
+
+test("uppercases lowercase DECLARE and type names", function()
+  local out = f("declare @n int = 1; declare @s nvarchar(50)")
+  has(out, "DECLARE @n INT", true)
+  has(out, "DECLARE @s NVARCHAR(50)", true)
+end)
+
+test("variables stay one token", function()
+  local out = f("select @@rowcount, @id where col @> '{1}'")
+  has(out, "@@rowcount", true)
+  has(out, "@id", true)
+  has(out, "@>", true)
+  hasnt(out, "@ ")
+end)
+
+test("type names keep their argument list attached", function()
+  local out = f("select cast(x as decimal(10, 2)), cast(y as varchar(max)) from t")
+  has(out, "DECIMAL(10, 2)", true)
+  has(out, "VARCHAR(max)", true)
+  hasnt(out, "DECIMAL %(")
+end)
+
+test("uppercases multi-word types", function()
+  local out = f("select cast(ts as timestamp with time zone), cast(d as double precision) from t")
+  has(out, "TIMESTAMP WITH TIME ZONE", true)
+  has(out, "DOUBLE PRECISION", true)
+end)
+
 -- ── String literals: keywords inside must NOT trigger newlines ─────────────
 
 test("does not split on FROM inside a string literal", function()

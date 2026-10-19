@@ -128,6 +128,14 @@ local function tokenize(sql)
       table.insert(tokens, { type = "ws", text = sql:sub(i, j - 1) })
       i = j
 
+    -- Variable (@n, @@ROWCOUNT; SQL Server and MySQL): one word, so the formatter
+    -- never splits it into "@ n". Operators like @> and <@ have no letter after @.
+    elseif sql:match("^@@?[%a_]", i) then
+      local j = i + (sql:sub(i + 1, i + 1) == "@" and 2 or 1)
+      while j <= n and sql:sub(j, j):match("^[%w_]$") do j = j + 1 end
+      table.insert(tokens, { type = "word", text = sql:sub(i, j - 1) })
+      i = j
+
     -- Word: starts with letter, underscore, or digit; continues with [A-Za-z0-9_]
     -- Digits starting sequences are numbers (handled as "word" to preserve sequences
     -- like "1e10", "0x1F", etc.)
@@ -177,8 +185,23 @@ for _, w in ipairs({
   "FILTER", "WITHIN", "TRUE", "FALSE", "UNKNOWN",
   "TO", "RECURSIVE", "MATERIALIZED", "TEMPORARY", "TEMP",
   "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK", "DEFAULT",
-  "CONSTRAINT", "NOT",
+  "CONSTRAINT", "NOT", "DECLARE",
 }) do UPCASE[w] = true end
+
+-- Data type names, uppercased like keywords. Kept apart from UPCASE because a
+-- type is written like a function call: VARCHAR(50), not VARCHAR (50).
+local TYPES = {}
+for _, w in ipairs({
+  "INT", "INTEGER", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT", "HUGEINT",
+  "DECIMAL", "NUMERIC", "REAL", "FLOAT", "DOUBLE", "PRECISION", "MONEY", "SMALLMONEY",
+  "BIT", "BOOL", "BOOLEAN",
+  "CHAR", "NCHAR", "VARCHAR", "NVARCHAR", "CHARACTER", "VARYING", "TEXT", "NTEXT", "CLOB",
+  "BINARY", "VARBINARY", "BLOB", "BYTEA", "IMAGE",
+  "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ", "DATETIME", "DATETIME2", "SMALLDATETIME",
+  "DATETIMEOFFSET", "INTERVAL", "ZONE",
+  "UUID", "UNIQUEIDENTIFIER", "JSON", "JSONB", "XML",
+  "SERIAL", "SMALLSERIAL", "BIGSERIAL", "ROWVERSION", "SQL_VARIANT",
+}) do TYPES[w] = true end
 
 -- Single-word clause keywords: trigger a newline before them at parenthesis depth 0.
 local CLAUSE_SINGLE = {}
@@ -452,7 +475,7 @@ local function _format_lua(sql)
           else
             -- Regular word: space if needed, uppercase if keyword
             maybe_space()
-            emit(UPCASE[upper] and upper or text)
+            emit((UPCASE[upper] or TYPES[upper]) and upper or text)
             first   = false
             last_kw = UPCASE[upper] == true
           end

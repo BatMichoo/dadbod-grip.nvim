@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The pad is filled only when empty, or when it still holds its own untouched query.
 - Query pad: the key hint is virtual text shown only while the pad is empty, instead of a
   `-- F5:run ...` comment line written into the buffer.
+- Formatter: `DECLARE` and data type names (`INT`, `NVARCHAR`, `DECIMAL`, `DATETIME2`,
+  `UNIQUEIDENTIFIER`, ...) are uppercased like other keywords; types keep their arguments
+  attached (`VARCHAR(50)`). Variables such as `@id` and `@@ROWCOUNT` are no longer split
+  into `@ id`.
 
 ## [3.12.0] - 2026-10-16
 
