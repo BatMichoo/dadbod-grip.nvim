@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UNIQUEIDENTIFIER`, ...) are uppercased like other keywords; types keep their arguments
   attached (`VARCHAR(50)`). Variables such as `@id` and `@@ROWCOUNT` are no longer split
   into `@ id`.
+- Query pad: `DECLARE` and the same data type names are highlighted under Vim's regex SQL
+  syntax, whose default Oracle dialect left `NVARCHAR`, `DATETIME2`, `UNIQUEIDENTIFIER` and
+  others plain.
 - UPDATE, DELETE and INSERT report the row count the database returns ("7 rows affected")
   instead of the preview's count, and warn when the two differ. Other statements run from
   the pad (a mutating `WITH`, `MERGE`, a `BEGIN` block) report their count too.

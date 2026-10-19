@@ -357,6 +357,24 @@ do
   eq(#hints(), 1, "hint: back when the pad is blank again")
 end
 
+-- ── syntax: formatter words are highlighted under regex SQL syntax ───────────
+
+do
+  vim.cmd("syntax on")
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "declare @n NVarChar(50)" })
+  vim.api.nvim_buf_call(b, function() vim.bo.filetype = "sql" end)
+  qp._add_syntax_words(b)
+  local function grp(col)
+    return vim.api.nvim_buf_call(b, function()
+      return vim.fn.synIDattr(vim.fn.synID(1, col, 1), "name")
+    end)
+  end
+  eq(grp(1), "sqlStatement", "syntax: declare is a statement")
+  eq(grp(12), "sqlType", "syntax: NVarChar is a type, any case")
+  pcall(vim.api.nvim_buf_delete, b, { force = true })
+end
+
 -- ── quitting Neovim never asks to save the pad ──────────────────────────────
 
 do

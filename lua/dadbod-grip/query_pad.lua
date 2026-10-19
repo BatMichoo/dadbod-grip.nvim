@@ -65,6 +65,20 @@ end
 M._hint_ns = _hint_ns  -- exported for unit tests
 M._refresh_hint = _refresh_hint
 
+--- Highlight the words the formatter knows (DECLARE, NVARCHAR, DATETIME2, ...)
+--- under Vim's regex SQL syntax, whose default Oracle dialect lacks them. Only
+--- touches a buffer whose syntax is sql; tree-sitter highlighting is unaffected.
+local function _add_syntax_words(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or vim.b[bufnr].current_syntax ~= "sql" then return end
+  local words = require("dadbod-grip.format").syntax_words
+  vim.api.nvim_buf_call(bufnr, function()
+    -- sqloracle sets "syn case ignore", so lowercase words match any case.
+    vim.cmd("syntax keyword sqlStatement " .. table.concat(words.statements, " "):lower())
+    vim.cmd("syntax keyword sqlType " .. table.concat(words.types, " "):lower())
+  end)
+end
+M._add_syntax_words = _add_syntax_words  -- exported for unit tests
+
 --- Get or create the query pad buffer.
 local function ensure_buf(url)
   if _pad_bufnr and vim.api.nvim_buf_is_valid(_pad_bufnr) then
@@ -77,6 +91,14 @@ local function ensure_buf(url)
   _last_synced = nil  -- fresh pad has no auto-sync history to reclaim
   vim.bo[_pad_bufnr].buftype = "acwrite"
   vim.bo[_pad_bufnr].swapfile = false
+  -- Before filetype is set, so the Syntax event it fires already reaches us.
+  -- Syntax runs again on :syntax on / colorscheme reloads; re-add each time.
+  local syn_buf = _pad_bufnr
+  vim.api.nvim_create_autocmd("Syntax", {
+    group = _ag,
+    buffer = syn_buf,
+    callback = function() _add_syntax_words(syn_buf) end,
+  })
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url

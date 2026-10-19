@@ -190,8 +190,7 @@ for _, w in ipairs({
 
 -- Data type names, uppercased like keywords. Kept apart from UPCASE because a
 -- type is written like a function call: VARCHAR(50), not VARCHAR (50).
-local TYPES = {}
-for _, w in ipairs({
+local TYPE_NAMES = {
   "INT", "INTEGER", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT", "HUGEINT",
   "DECIMAL", "NUMERIC", "REAL", "FLOAT", "DOUBLE", "PRECISION", "MONEY", "SMALLMONEY",
   "BIT", "BOOL", "BOOLEAN",
@@ -201,7 +200,16 @@ for _, w in ipairs({
   "DATETIMEOFFSET", "INTERVAL", "ZONE",
   "UUID", "UNIQUEIDENTIFIER", "JSON", "JSONB", "XML",
   "SERIAL", "SMALLSERIAL", "BIGSERIAL", "ROWVERSION", "SQL_VARIANT",
-}) do TYPES[w] = true end
+}
+local TYPES = {}
+for _, w in ipairs(TYPE_NAMES) do TYPES[w] = true end
+
+-- Words the formatter knows that Vim's default SQL syntax (Oracle flavoured)
+-- leaves unhighlighted; the query pad registers them as syntax keywords.
+M.syntax_words = {
+  statements = { "DECLARE" },
+  types      = TYPE_NAMES,
+}
 
 -- Single-word clause keywords: trigger a newline before them at parenthesis depth 0.
 local CLAUSE_SINGLE = {}
