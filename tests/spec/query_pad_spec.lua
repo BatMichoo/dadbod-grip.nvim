@@ -362,7 +362,7 @@ end
 do
   vim.cmd("syntax on")
   local b = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "declare @n NVarChar(50)" })
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "declare @n NVarChar(50) = IsNull(x, 0)" })
   vim.api.nvim_buf_call(b, function() vim.bo.filetype = "sql" end)
   qp._add_syntax_words(b)
   local function grp(col)
@@ -372,6 +372,7 @@ do
   end
   eq(grp(1), "sqlStatement", "syntax: declare is a statement")
   eq(grp(12), "sqlType", "syntax: NVarChar is a type, any case")
+  eq(grp(27), "sqlFunction", "syntax: IsNull is a function, any case")
   pcall(vim.api.nvim_buf_delete, b, { force = true })
 end
 

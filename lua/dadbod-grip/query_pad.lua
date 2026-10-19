@@ -65,7 +65,7 @@ end
 M._hint_ns = _hint_ns  -- exported for unit tests
 M._refresh_hint = _refresh_hint
 
---- Highlight the words the formatter knows (DECLARE, NVARCHAR, DATETIME2, ...)
+--- Highlight words Vim's SQL syntax lacks (DECLARE, NVARCHAR, ISNULL, ...)
 --- under Vim's regex SQL syntax, whose default Oracle dialect lacks them. Only
 --- touches a buffer whose syntax is sql; tree-sitter highlighting is unaffected.
 local function _add_syntax_words(bufnr)
@@ -75,6 +75,7 @@ local function _add_syntax_words(bufnr)
     -- sqloracle sets "syn case ignore", so lowercase words match any case.
     vim.cmd("syntax keyword sqlStatement " .. table.concat(words.statements, " "):lower())
     vim.cmd("syntax keyword sqlType " .. table.concat(words.types, " "):lower())
+    vim.cmd("syntax keyword sqlFunction " .. table.concat(words.functions, " "):lower())
   end)
 end
 M._add_syntax_words = _add_syntax_words  -- exported for unit tests

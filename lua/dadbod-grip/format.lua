@@ -206,9 +206,32 @@ for _, w in ipairs(TYPE_NAMES) do TYPES[w] = true end
 
 -- Words the formatter knows that Vim's default SQL syntax (Oracle flavoured)
 -- leaves unhighlighted; the query pad registers them as syntax keywords.
+-- Functions are highlight-only: the formatter never uppercases function names.
+-- Names that are common column names (year, month, day, age) or join keywords
+-- (left, right) are left out, since a keyword highlights with or without "(".
 M.syntax_words = {
   statements = { "DECLARE" },
   types      = TYPE_NAMES,
+  functions  = {
+    -- conversion and null handling
+    "CAST", "TRY_CAST", "CONVERT", "TRY_CONVERT", "PARSE", "TRY_PARSE", "FORMAT",
+    "ISNULL", "IFNULL", "NULLIF", "COALESCE", "NVL", "NVL2", "IIF", "CHOOSE",
+    "GREATEST", "LEAST",
+    -- strings
+    "LEN", "DATALENGTH", "CHARINDEX", "PATINDEX", "SUBSTRING", "STUFF", "REPLICATE",
+    "REVERSE", "QUOTENAME", "CONCAT_WS", "STRING_AGG", "STRING_SPLIT", "STRPOS",
+    "SPLIT_PART", "POSITION", "GROUP_CONCAT", "CEILING",
+    -- dates
+    "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET",
+    "DATEADD", "DATEDIFF", "DATEDIFF_BIG", "DATEPART", "DATENAME", "DATEFROMPARTS",
+    "EOMONTH", "NOW", "DATE_TRUNC", "DATE_PART", "DATE_FORMAT", "STRFTIME", "JULIANDAY",
+    -- windows
+    "ROW_NUMBER", "NTILE", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
+    -- identity, json, misc
+    "NEWID", "NEWSEQUENTIALID", "SCOPE_IDENTITY", "OBJECT_ID", "GEN_RANDOM_UUID",
+    "JSON_VALUE", "JSON_QUERY", "JSON_EXTRACT", "OPENJSON", "ISJSON",
+    "ARRAY_AGG", "JSON_AGG", "JSONB_AGG",
+  },
 }
 
 -- Single-word clause keywords: trigger a newline before them at parenthesis depth 0.
