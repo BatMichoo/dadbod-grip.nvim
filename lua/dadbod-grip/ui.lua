@@ -120,6 +120,18 @@ function M.slice_display(s, from, width)
   return table.concat(out)
 end
 
+--- Highlight a display-only buffer as `ft` without setting 'filetype'.
+--- Setting it fires FileType, and SQL completion plugins answer that by
+--- connecting to the database (vim-dadbod-completion uses g:db), which a
+--- preview or a float has no use for and which errors when the server is down.
+--- Tree-sitter when a parser is installed, regex syntax otherwise.
+function M.highlight_as(buf, ft)
+  local lang = vim.treesitter.language.get_lang(ft) or ft
+  if not pcall(vim.treesitter.start, buf, lang) then
+    vim.bo[buf].syntax = ft
+  end
+end
+
 --- Return the configured float border style.
 --- Lazy-requires init to avoid circular dependency.
 function M.border()

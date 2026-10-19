@@ -619,5 +619,20 @@ test("report_split: height follows content and requests no more than 30", functi
   assert(h2 <= 30 and h2 >= h1, "actual split respects the request and available screen")
 end)
 
+test("highlight_as: highlights without firing FileType", function()
+  local fired = 0
+  local id = vim.api.nvim_create_autocmd("FileType", {
+    pattern = "sql", callback = function() fired = fired + 1 end,
+  })
+  local buf = vim.api.nvim_create_buf(false, true)
+  ui.highlight_as(buf, "sql")
+  vim.api.nvim_del_autocmd(id)
+  eq(fired, 0, "SQL completion plugins must not see a preview buffer")
+  eq(vim.bo[buf].filetype, "", "filetype stays unset")
+  assert(vim.bo[buf].syntax == "sql" or vim.b[buf].ts_highlight,
+    "regex syntax or tree-sitter highlighting")
+  vim.api.nvim_buf_delete(buf, { force = true })
+end)
+
 print(string.format("ui_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

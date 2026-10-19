@@ -422,7 +422,7 @@ local function open_routine_source(routine_name, url)
   vim.api.nvim_buf_set_name(bufnr, "grip://routine/" .. routine_name)
   vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].bufhidden = "wipe"
-  vim.bo[bufnr].filetype = "sql"
+  ui.highlight_as(bufnr, "sql")
   vim.bo[bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(source, "\n", { plain = true }))
   vim.bo[bufnr].modifiable = false

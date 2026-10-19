@@ -50,7 +50,7 @@ function M._update_live_sql_float(session)
   else
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, content_lines)
-    vim.api.nvim_set_option_value("filetype", "sql", { buf = buf })
+    ui.highlight_as(buf, "sql")
     vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 
     local win = vim.api.nvim_open_win(buf, false, {
@@ -128,13 +128,11 @@ function M.open_info_float(grip_win, lines, float_opts)
     col = float_opts.col or 0
   end
 
-  -- Buffer is created here, not by info_float: filetype must be set before the
-  -- window exists so FileType autocmds see the same state as before.
+  -- Buffer is created here, not by info_float, so it is highlighted before
+  -- the window exists.
   local popup_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, flat)
-  if float_opts.filetype then
-    vim.api.nvim_set_option_value("filetype", float_opts.filetype, { buf = popup_buf })
-  end
+  if float_opts.filetype then ui.highlight_as(popup_buf, float_opts.filetype) end
 
   local win = ui.info_float({
     buf = popup_buf,
