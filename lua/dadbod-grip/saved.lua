@@ -119,6 +119,19 @@ local function apply_metadata(content)
   return clean, bound_url
 end
 
+--- Name of the connection a saved query is bound to, read without switching
+--- or connecting. nil when the query is unbound.
+local function connection_label(content)
+  local _, connection_id, legacy_url = extract_metadata(content)
+  if connection_id then
+    local conn = require("dadbod-grip.connections").find_by_id(connection_id)
+    if not conn then return "missing connection" end
+    return conn.name or "unnamed connection"
+  elseif legacy_url then
+    return "legacy URL"
+  end
+end
+
 --- Save query content to a named .sql file.
 --- Persisted connections are referenced by opaque ID; URLs never enter SQL.
 function M.save(name, content, url)
@@ -173,7 +186,8 @@ function M.load(name)
   return apply_metadata(table.concat(vim.fn.readfile(path), "\n"))
 end
 
---- List all saved queries. Returns { {name, path, mtime}, ... }.
+--- List all saved queries. Returns { {name, path, connection}, ... };
+--- connection is the bound connection's name, nil for an unbound query.
 function M.list()
   local dir = queries_dir()
   if vim.fn.isdirectory(dir) == 0 then return {} end
@@ -181,7 +195,9 @@ function M.list()
   local result = {}
   for _, path in ipairs(files) do
     local name = vim.fn.fnamemodify(path, ":t:r")
-    table.insert(result, { name = name, path = path })
+    local ok, lines = pcall(vim.fn.readfile, path, "", 3)
+    local connection = ok and connection_label(table.concat(lines, "\n")) or nil
+    table.insert(result, { name = name, path = path, connection = connection })
   end
   table.sort(result, function(a, b) return a.name < b.name end)
   return result
@@ -208,13 +224,15 @@ function M.pick(callback)
   require("dadbod-grip.grip_picker").open({
     title = "Saved Queries",
     items = queries,
-    display = function(q) return q.name end,
+    display = function(q)
+      return q.connection and (q.name .. "  @ " .. q.connection) or q.name
+    end,
     preview = function(q)
       local ok, raw_lines = pcall(vim.fn.readfile, q.path)
       if not ok then return { "(file not readable)" } end
       local raw = table.concat(raw_lines, "\n")
       local content = extract_metadata(raw)
-      local out = {}
+      local out = q.connection and { "-- connection: " .. q.connection, "" } or {}
       for _, ln in ipairs(vim.split(content:match("^%s*(.-)%s*$"), "\n", { plain = true })) do
         table.insert(out, ln)
       end
@@ -236,5 +254,6 @@ end
 
 M._extract_metadata = extract_metadata
 M._has_literal_credential = has_literal_credential
+M._connection_label = connection_label
 
 return M

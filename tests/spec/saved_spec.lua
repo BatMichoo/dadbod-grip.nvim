@@ -240,6 +240,40 @@ test("legacy safe URLs switch unnamed and credentialed URLs never switch", funct
   end)
 end)
 
+test("list names each query's connection without switching to it", function()
+  with_storage(function(ctx)
+    write_json(ctx.local_file, { { id = "conn_saved", name = "production", url = "sqlite:/tmp/app.db" } })
+    paths.ensure_dir(ctx.query_dir)
+    vim.fn.writefile({ "-- grip:connection=conn_saved", "SELECT 1" }, ctx.query_dir .. "/bound.sql")
+    vim.fn.writefile({ "-- grip:connection=conn_gone", "SELECT 2" }, ctx.query_dir .. "/gone.sql")
+    vim.fn.writefile({ "SELECT 3" }, ctx.query_dir .. "/plain.sql")
+    vim.g.db = nil
+
+    with_switch_spy(function(calls)
+      local by_name = {}
+      for _, q in ipairs(saved.list()) do by_name[q.name] = q end
+      eq(by_name.bound.connection, "production", "bound query")
+      eq(by_name.gone.connection, "missing connection", "deleted connection")
+      eq(by_name.plain.connection, nil, "unbound query")
+      eq(#calls, 0, "listing never switches")
+    end)
+    eq(vim.g.db, nil, "listing never connects")
+  end)
+end)
+
+test("query pad opens without a connection", function()
+  with_storage(function()
+    vim.g.db = nil
+    local pad = require("dadbod-grip.query_pad")
+    pad.open(nil, { initial_sql = "SELECT 42" })
+    local buf = vim.api.nvim_get_current_buf()
+    eq(vim.api.nvim_buf_get_name(buf):match("grip://query$") ~= nil, true, "pad is current")
+    eq(table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"), "SELECT 42")
+    eq(vim.b[buf].db, nil, "pad stays unbound")
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)
+
 test("legacy conninfo credential keys are detected case-insensitively", function()
   assert(saved._has_literal_credential("postgres:HOST=db USER=app PASSWORD=literal-secret"))
   assert(saved._has_literal_credential("mysql:host=db TOKEN='literal token'"))

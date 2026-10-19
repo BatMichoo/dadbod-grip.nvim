@@ -484,19 +484,14 @@ local function setup_keymaps(bufnr, url)
 end
 
 --- Open the query pad.
---- @param url string connection URL
+--- @param url string|nil connection URL; nil falls back to the current one, if any
 --- @param opts? { initial_sql?: string }
 function M.open(url, opts)
   opts = opts or {}
 
-  if not url then
-    local db_mod = require("dadbod-grip.db")
-    url = db_mod.get_url()
-    if not url then
-      vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
-      return
-    end
-  end
+  -- No connection is fine: the pad still edits, loads and saves SQL, and
+  -- running it reports the missing connection.
+  url = url or require("dadbod-grip.db").get_url()
 
   local bufnr = ensure_buf(url)
   setup_keymaps(bufnr, url)
@@ -644,10 +639,7 @@ function M.pick_notebook()
     end,
     on_select = function(f)
       -- Ensure the pad is open and visible
-      local db_url = vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db
-        or vim.g.db
-        or require("dadbod-grip.db").get_url()
-      if db_url then M.open(db_url) end
+      M.open(vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db or nil)
       vim.schedule(function()
         local pad = _pad_bufnr
         if not pad or not vim.api.nvim_buf_is_valid(pad) then return end

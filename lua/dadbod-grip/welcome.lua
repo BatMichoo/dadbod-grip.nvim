@@ -222,6 +222,13 @@ function M.open_welcome()
     end
     require("dadbod-grip.er_diagram").toggle(conn)
   end, "ER diagram")
+  -- Saved queries live in .grip/queries and need no connection to browse;
+  -- a bound query switches to its own connection when picked.
+  wmap("gq",    function()
+    require("dadbod-grip.saved").pick(function(content, _, bound_url)
+      require("dadbod-grip.query_pad").open(bound_url or cur_conn(), { initial_sql = content })
+    end)
+  end, "Load saved query")
   wmap("?",     function() view.show_help() end, "Full keymap help")
 
   -- 1-9: surface navigation from welcome screen
