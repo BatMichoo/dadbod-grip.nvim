@@ -123,7 +123,7 @@ test("s on a data row sorts the column under the cursor", function()
   session.on_requery = function(_, spec) captured = spec end
 
   local target = session._render.visible_columns[2]
-  vim.api.nvim_win_set_cursor(win, { 5, session._render.byte_positions[1][target].start })
+  vim.api.nvim_win_set_cursor(win, { session._render.data_start, session._render.byte_positions[1][target].start })
   assert(press(bufnr, "s"), "s is mapped")
   assert(captured, "requery fired")
   eq(captured.sorts[1].column, target, "sorted the column under the cursor")
@@ -140,7 +140,7 @@ test("s on the header row sorts, instead of refusing for want of a data row", fu
   session.on_requery = function(_, spec) captured = spec end
 
   local target = session._render.visible_columns[3]
-  vim.api.nvim_win_set_cursor(win, { 2, session._render.hdr_byte_positions[target].start })
+  vim.api.nvim_win_set_cursor(win, { session._render.hdr_row, session._render.hdr_byte_positions[target].start })
   assert(press(bufnr, "s"), "s is mapped")
   assert(captured, "requery fired from the header row")
   eq(captured.sorts[1].column, target, "sorted the header column under the cursor")
@@ -159,7 +159,7 @@ test("s on the type row uses the type row's byte offsets, not the header's", fun
   local captured
   session.on_requery = function(_, spec) captured = spec end
 
-  vim.api.nvim_win_set_cursor(win, { 3, col_nr })
+  vim.api.nvim_win_set_cursor(win, { session._render.type_row, col_nr })
   assert(press(bufnr, "s"), "s is mapped")
   assert(captured, "requery fired from the type row")
   eq(captured.sorts[1].column, on_type, "sorted the column the cursor is really over")
@@ -180,7 +180,7 @@ test("S on the type row stacks a sort on the right column", function()
   local captured
   session.on_requery = function(_, spec) captured = spec end
 
-  vim.api.nvim_win_set_cursor(win, { 3, col_nr })
+  vim.api.nvim_win_set_cursor(win, { session._render.type_row, col_nr })
   assert(press(bufnr, "S"), "S is mapped")
   assert(captured, "requery fired")
   eq(captured.sorts[#captured.sorts].column, on_type, "stacked sort on the cursor's column")
@@ -201,7 +201,7 @@ test("filter IS NULL on the type row targets the cursor's column", function()
   local captured
   session.on_requery = function(_, spec) captured = spec end
 
-  vim.api.nvim_win_set_cursor(win, { 3, col_nr })
+  vim.api.nvim_win_set_cursor(win, { session._render.type_row, col_nr })
   local km = require("dadbod-grip.keymaps")
   assert(press(bufnr, km.get("grid_filter_null")), "filter-null is mapped")
   assert(captured, "requery fired")
@@ -224,7 +224,7 @@ test("f on the type row still refuses: a cell value needs a data row", function(
   local captured
   session.on_requery = function(_, spec) captured = spec end
 
-  vim.api.nvim_win_set_cursor(win, { 3, 4 })
+  vim.api.nvim_win_set_cursor(win, { session._render.type_row, 4 })
   press(bufnr, "f")
   eq(captured, nil, "quick-filter-by-value is scoped to a cell, not a column")
   cleanup()

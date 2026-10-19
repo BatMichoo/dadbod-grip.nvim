@@ -53,7 +53,7 @@ function M.setup(bufnr, ctx)
       end
 
       -- Highlight all data rows
-      local ds = r.data_start or 4
+      local ds = r.data_start or 5
       local ordered = r.ordered or {}
       for i = 1, #ordered do
         local bp_row = r.byte_positions and r.byte_positions[i]

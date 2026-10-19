@@ -42,7 +42,7 @@ function M.setup(bufnr, ctx)
     if not session or not session._render then return end
     local r = session._render
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local current_order = cursor[1] - ds + 1
     local st = session.state
     -- Scan backwards from current position, wrapping around
@@ -64,7 +64,7 @@ function M.setup(bufnr, ctx)
     if not session or not session._render then return end
     local r = session._render
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local current_order = cursor[1] - ds + 1
     local st = session.state
     -- Scan forward from current position, wrapping around
@@ -142,7 +142,7 @@ function M.setup(bufnr, ctx)
     -- Multiple values: spread into consecutive rows
     local r = session._render
     if not r then return end
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
     local start_order = cursor_line - ds + 1
     if start_order < 1 then return end

@@ -324,7 +324,8 @@ function M.open(state, url, query_sql, opts)
 
   -- Move cursor to first data cell, enable row tracking
   -- Byte offset 4 = after "║ " (║ is 3 bytes + 1 space)
-  pcall(vim.api.nvim_win_set_cursor, winid, { 4, #("║ ") })
+  local rendered = M._sessions[bufnr] and M._sessions[bufnr]._render
+  pcall(vim.api.nvim_win_set_cursor, winid, { rendered and rendered.data_start or 5, #("║ ") })
   vim.api.nvim_set_option_value("cursorline", true, { win = winid })
   vim.api.nvim_set_option_value("wrap", false, { win = winid })
   vim.api.nvim_set_option_value("sidescrolloff", 5, { win = winid })
@@ -567,7 +568,7 @@ local function make_keymap_ctx(bufnr)
     local session = ctx.session()
     if not session or not session._render then return nil end
     local r = session._render
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local rows = {}
     for line = start_line, end_line do
       local row_order = line - ds + 1

@@ -15,7 +15,7 @@ function M.setup(bufnr, ctx)
   local kvmap, get_visual_rows = ctx.kvmap, ctx.get_visual_rows
 
   -- Visual gg/G/j/k: clamp selection to the data-row range so it stops at the
-  -- last data row instead of overshooting onto the separator/footer/hint line
+  -- last data row instead of overshooting onto the separator/footer lines
   -- (issue #20). Mirrors the normal-mode clamps; like them, it ignores counts.
   local function visual_nav(target_fn)
     return function()

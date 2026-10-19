@@ -56,7 +56,8 @@ test("render: Korean cell content keeps table lines aligned", function()
     url = "mysql://localhost/local_db",
   })
   local bufnr = view.open(st, st.url, "SELECT * FROM problem_hint", { max_col_width = 12 })
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 6, false)
+  -- Line 1 is the hint line; the table starts at line 2.
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 1, 7, false)
   local expected = vim.fn.strdisplaywidth(lines[1])
   for i = 2, 6 do
     eq(vim.fn.strdisplaywidth(lines[i]), expected, "line " .. i .. " display width")
@@ -74,7 +75,8 @@ test("render: tabs and newlines in values keep table lines aligned", function()
     url = "sqlite:x",
   })
   local bufnr = view.open(st, st.url, "SELECT * FROM notes", {})
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 7, false)
+  -- Line 1 is the hint line; the table starts at line 2.
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 1, 8, false)
   local expected = vim.fn.strdisplaywidth(lines[1])
   for i = 2, 7 do
     eq(vim.fn.strdisplaywidth(lines[i]), expected, "line " .. i .. " display width")

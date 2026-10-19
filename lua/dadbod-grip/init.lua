@@ -239,7 +239,7 @@ local function cursor_to_new_row(session, new_state)
   if not r then return end
   for i, idx in ipairs(r.ordered) do
     if new_state.inserted[idx] and idx == new_state._next_insert_idx - 1 then
-      local line_nr = i + (r.data_start or 4) - 1
+      local line_nr = i + (r.data_start or 5) - 1
       local bp_row = r.byte_positions and r.byte_positions[i]
       local first_col = new_state.columns[1]
       local col_byte = bp_row and bp_row[first_col] and bp_row[first_col].start or #("║ ")

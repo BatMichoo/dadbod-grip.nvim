@@ -45,8 +45,9 @@ function M._update_winbar(bufnr)
 
   local sticky = require("dadbod-grip.config").values.sticky_header ~= false
   local view_state = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
-  -- Buffer line 2 IS the column-name row. While it is still on screen the winbar
-  -- would only show it a second time, so it goes blank instead of duplicating —
+  -- Buffer line hdr_row (under the hint line and the title) IS the column-name
+  -- row. While it is still on screen the winbar would only show it a second
+  -- time, so it goes blank instead of duplicating —
   -- blank rather than unset, because unsetting drops the line and shifts the
   -- whole grid by one row exactly when scrolling crosses this threshold.
   --
@@ -57,9 +58,10 @@ function M._update_winbar(bufnr)
   -- window always shows its header, whatever topline claims.
   local fits_in_window =
     vim.api.nvim_buf_line_count(bufnr) <= vim.api.nvim_win_get_height(winid)
-  local hdr_on_screen = fits_in_window or (view_state.topline or 1) <= 2
+  local hdr_row = session._render and session._render.hdr_row or 3
+  local hdr_on_screen = fits_in_window or (view_state.topline or 1) <= hdr_row
   local hdr_line = sticky and not hdr_on_screen and session._render
-    and session._render.lines and session._render.lines[2] or nil
+    and session._render.lines and session._render.lines[hdr_row] or nil
   local bar
   if hdr_line then
     local wininfo = vim.fn.getwininfo(winid)[1]

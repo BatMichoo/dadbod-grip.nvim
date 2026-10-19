@@ -363,7 +363,8 @@ function M.switch_view(bufnr, view_name, opts)
       pcall(vim.api.nvim_win_set_cursor, cur_win, session.view_cache[view_name].cursor)
     else
       -- Default: top of data
-      pcall(vim.api.nvim_win_set_cursor, cur_win, { 5, 0 })
+      local r = session._render
+      pcall(vim.api.nvim_win_set_cursor, cur_win, { r and r.data_start or 5, 0 })
     end
   end
 end

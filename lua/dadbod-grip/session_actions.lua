@@ -30,7 +30,7 @@ function M._next_edit_cursor(r, edited_row_idx, edited_col)
   end
   if not edit_order then return nil end
   local next_order = math.min(edit_order + 1, #ordered)
-  local next_line  = (r.data_start or 4) + next_order - 1
+  local next_line  = (r.data_start or 5) + next_order - 1
   local bp     = r.byte_positions and r.byte_positions[next_order]
   local col_bp = bp and bp[edited_col]
   if not col_bp then return nil end

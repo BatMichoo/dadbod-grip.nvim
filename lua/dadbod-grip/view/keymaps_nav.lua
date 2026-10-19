@@ -101,7 +101,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session or not session._render then return end
     local r = session._render
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local cursor = vim.api.nvim_win_get_cursor(0)
     vim.api.nvim_win_set_cursor(0, { ds, cursor[2] })
   end, "First data row")
@@ -111,7 +111,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session or not session._render then return end
     local r = session._render
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local last = ds + #r.ordered - 1
     local cursor = vim.api.nvim_win_get_cursor(0)
     vim.api.nvim_win_set_cursor(0, { last, cursor[2] })
@@ -125,16 +125,16 @@ function M.setup(bufnr, ctx)
       return
     end
     local r = session._render
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local cursor = vim.api.nvim_win_get_cursor(0)
     local line = cursor[1]
     local col_nr = cursor[2]
     local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
     -- From first data row or separator: jump to nearest useful row above (type row or header)
     if line == ds or line == ds - 1 then
-      local target_line = ds - 2  -- line 3 (type row) when ds=5, line 2 (header) when ds=4
+      local target_line = ds - 2  -- the type row when shown, else the header
       -- Use type_row_byte_positions when landing on type row, else hdr_byte_positions
-      local ref_bp = (ds == 5 and r.type_row_byte_positions) or r.hdr_byte_positions
+      local ref_bp = (r.type_row and r.type_row_byte_positions) or r.hdr_byte_positions
       -- Snap to same column using first data row byte positions
       local data_bp = r.byte_positions and r.byte_positions[1]
       local snap = data_bp and view._snap_col(vis_cols, data_bp, col_nr)
@@ -154,22 +154,23 @@ function M.setup(bufnr, ctx)
       return
     end
     local r = session._render
-    local ds = r.data_start or 4
+    local ds = r.data_start or 5
     local cursor = vim.api.nvim_win_get_cursor(0)
     local line = cursor[1]
     local col_nr = cursor[2]
     local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
     -- From header/type/separator zone: jump directly to first data row
-    if line >= 2 and line < ds then
+    local hdr = r.hdr_row or 3
+    if line >= hdr and line < ds then
       if not r.ordered or #r.ordered == 0 then
         vim.api.nvim_feedkeys("j", "n", false)
         return
       end
       -- Identify column from source row byte positions
       local ref_bp
-      if line == 2 then
+      if line == hdr then
         ref_bp = r.hdr_byte_positions
-      elseif r.type_row_byte_positions and line == ds - 2 then
+      elseif r.type_row_byte_positions and line == r.type_row then
         ref_bp = r.type_row_byte_positions
       else
         ref_bp = r.hdr_byte_positions

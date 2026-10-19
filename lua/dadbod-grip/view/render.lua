@@ -383,12 +383,39 @@ local function build_render(session, opts)
     table.insert(marks, { line = line_idx - 1, col = byte_start, end_col = byte_end, hl = hl })
   end
 
+  -- ── Hint line (first line, above the grid) ──
+  local hints
+  local cv = session.current_view
+  if cv and cv ~= "records" then
+    -- Metadata view: compact tab bar with current view marked (▶)
+    local parts = {}
+    for i = 4, 9 do
+      local vn = VIEW_KEYS[i]
+      local label = VIEW_LABELS[vn] or vn
+      if vn == cv then
+        table.insert(parts, "▶" .. i .. ":" .. label)
+      else
+        table.insert(parts, i .. ":" .. label)
+      end
+    end
+    hints = " " .. table.concat(parts, "  ") .. "  │  r:refresh  q:query  ?:help"
+  elseif session.pending_mutation then
+    local mt = session.pending_mutation.type or "SQL"
+    hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
+  elseif st.readonly and not is_editable(session) then
+    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
+  else
+    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
+  end
+  table.insert(lines, hints)
+
   -- ── Title row ──
   local title = title_line(session, columns, widths, total_width)
   table.insert(lines, title)
   push_mark(#lines, 0, #title, "GripBorder")
 
   -- ── Header row ──
+  local hdr_row = #lines + 1
   local hdr_parts = { "║" }
   local qspec = session.query_spec
   -- Computed during assembly using #padded (byte length), not widths[col] (display width).
@@ -607,34 +634,9 @@ local function build_render(session, opts)
     end
   end
 
-  -- ── Hint line ──
-  local hints
-  local cv = session.current_view
-  if cv and cv ~= "records" then
-    -- Metadata view: compact tab bar with current view marked (▶)
-    local parts = {}
-    for i = 4, 9 do
-      local vn = VIEW_KEYS[i]
-      local label = VIEW_LABELS[vn] or vn
-      if vn == cv then
-        table.insert(parts, "▶" .. i .. ":" .. label)
-      else
-        table.insert(parts, i .. ":" .. label)
-      end
-    end
-    hints = " " .. table.concat(parts, "  ") .. "  │  r:refresh  q:query  ?:help"
-  elseif session.pending_mutation then
-    local mt = session.pending_mutation.type or "SQL"
-    hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
-  elseif st.readonly and not is_editable(session) then
-    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
-  else
-    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  gL:pin  gJ:switch  4-9:views  ?:help"
-  end
-  table.insert(lines, hints)
 
-  local data_start = has_type_row and 5 or 4
-  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, hdr_byte_positions = hdr_byte_positions, type_row_byte_positions = type_row_byte_positions, data_start = data_start, visible_columns = columns }
+  local data_start = hdr_row + (has_type_row and 3 or 2)
+  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, hdr_byte_positions = hdr_byte_positions, type_row_byte_positions = type_row_byte_positions, hdr_row = hdr_row, type_row = has_type_row and hdr_row + 1 or nil, data_start = data_start, visible_columns = columns }
 end
 
 M.NULL_DISPLAY = NULL_DISPLAY

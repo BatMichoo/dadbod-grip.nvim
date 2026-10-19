@@ -21,7 +21,7 @@ function M.get_cell(bufnr)
   local col_nr  = cursor[2]  -- 0-based byte offset
 
   -- Data rows start at line 4 (title, header, sep) or 5 (with type row)
-  local data_start = r.data_start or 4
+  local data_start = r.data_start or 5
   local data_end = data_start + #r.ordered - 1
   if line_nr < data_start or line_nr > data_end then return nil end
 
@@ -95,11 +95,11 @@ function M._snap_col(vis_cols, bp_row, col_nr)
 end
 
 --- Clamp a buffer line to the data-row range [data_start, data_start + #ordered - 1].
---- The title/header/type/separator rows sit above this range and the footer/hint
---- line sits below it; visual-mode navigation reuses this so `G`/`j`/`k` stop at the
+--- The hint/title/header/type/separator rows sit above this range and the
+--- footer sits below it; visual-mode navigation reuses this so `G`/`j`/`k` stop at the
 --- last data row instead of overshooting onto the footer (issue #20). Pure/testable.
 function M._clamp_data_line(r, line)
-  local ds = r.data_start or 4
+  local ds = r.data_start or 5
   local last = ds + #r.ordered - 1
   if last < ds then last = ds end  -- empty result set: collapse to data_start
   if line < ds then return ds end
@@ -179,10 +179,10 @@ end
 --- @param fallback? boolean
 --- @return table|nil  map of column name -> { start, finish } byte offsets
 function M.resolve_row_bp(r, line, fallback)
-  local ds = r.data_start or 4
+  local ds = r.data_start or 5
   local di = line - ds + 1
   if di < 1 then
-    if ds == 5 and line == ds - 2 then return r.type_row_byte_positions end
+    if r.type_row and line == r.type_row then return r.type_row_byte_positions end
     return r.hdr_byte_positions
   end
   local bp = r.byte_positions and r.byte_positions[di]

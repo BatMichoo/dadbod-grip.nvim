@@ -132,11 +132,13 @@ end)
 -- hdr_byte_positions therefore resolved the wrong column while the cursor sat
 -- on the type row.
 
--- data_start = 5 means: title, header, type row (line 3), separator (line 4).
+-- Hint line 1, title 2, header 3, type row 4, separator 5, data from line 6.
 -- The type row's "id" column is one byte narrower here, which pushes name and
 -- email two bytes right of where the header has them.
 local render = {
-  data_start = 5,
+  hdr_row = 3,
+  type_row = 4,
+  data_start = 6,
   visible_columns = vis_cols,
   hdr_byte_positions = bp_row,
   type_row_byte_positions = {
@@ -154,7 +156,7 @@ local render = {
 }
 
 test("_resolve_col_at: header row resolves through hdr_byte_positions", function()
-  eq(view._resolve_col_at(render, vis_cols, 2, 11), "name", "byte 11 is name.start in the header")
+  eq(view._resolve_col_at(render, vis_cols, 3, 11), "name", "byte 11 is name.start in the header")
 end)
 
 test("_resolve_col_at: type row resolves through its own byte positions", function()
@@ -163,16 +165,16 @@ test("_resolve_col_at: type row resolves through its own byte positions", functi
   -- 13). Reading the header here is exactly the old bug.
   eq(view._snap_col(vis_cols, render.hdr_byte_positions, 11).col_name, "name",
     "the header would answer name")
-  eq(view._resolve_col_at(render, vis_cols, 3, 11), "id",
+  eq(view._resolve_col_at(render, vis_cols, 4, 11), "id",
     "on the type row the cursor is still over id")
 end)
 
 test("_resolve_col_at: data row resolves through that row's positions", function()
-  eq(view._resolve_col_at(render, vis_cols, 5, 11), "name", "first data row")
+  eq(view._resolve_col_at(render, vis_cols, 6, 11), "name", "first data row")
 end)
 
 test("_resolve_col_at: separator row falls back to the header", function()
-  eq(view._resolve_col_at(render, vis_cols, 4, 11), "name", "line 4 is the separator")
+  eq(view._resolve_col_at(render, vis_cols, 5, 11), "name", "line 5 is the separator")
 end)
 
 test("_resolve_col_at: a line past the last data row still resolves", function()
