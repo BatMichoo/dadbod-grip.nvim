@@ -730,6 +730,7 @@ function M.execute(sql_str, url)
   local n = stdout:match("UPDATE (%d+)") or
             stdout:match("INSERT %d+ (%d+)") or
             stdout:match("DELETE (%d+)") or
+            stdout:match("MERGE (%d+)") or
             "0"
   return { affected = tonumber(n) or 0, message = stdout:gsub("%s+$", "") }, nil
 end

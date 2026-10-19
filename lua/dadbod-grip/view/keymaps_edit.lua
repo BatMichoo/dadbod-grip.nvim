@@ -110,14 +110,23 @@ function M.setup(bufnr, ctx)
         "&Execute\n&Cancel", 2)
       if choice ~= 1 then return end
       local t0 = vim.uv.hrtime()
-      local _, err = db.execute(pm.sql, session.url)
+      local res, err = db.execute(pm.sql, session.url)
       local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
       if err then
         vim.notify("Failed: " .. err, vim.log.levels.ERROR)
         return
       end
-      vim.notify(string.format("%s executed (%dms, %d row%s)",
-        pm.type, ms, pm.row_count, pm.row_count == 1 and "" or "s"), vim.log.levels.INFO)
+      -- Report what the database says changed, not the preview's row count; they
+      -- differ with LIMIT/TOP, triggers, or rows changed since the preview.
+      local n = res and res.affected
+      if n and n ~= pm.row_count then
+        vim.notify(string.format("%s executed (%dms, %d row%s affected; preview showed %d)",
+          pm.type, ms, n, n == 1 and "" or "s", pm.row_count), vim.log.levels.WARN)
+      else
+        n = n or pm.row_count
+        vim.notify(string.format("%s executed (%dms, %d row%s affected)",
+          pm.type, ms, n, n == 1 and "" or "s"), vim.log.levels.INFO)
+      end
       local history = require("dadbod-grip.history")
       history.record({ sql = pm.sql, url = session.url, type = pm.type:lower(), elapsed_ms = ms })
       -- Clear mutation state and reopen the full table

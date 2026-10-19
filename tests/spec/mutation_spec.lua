@@ -129,6 +129,55 @@ test("preview: INSERT previews the whole table and counts the incoming rows", fu
   close_sessions()
 end)
 
+-- ── apply: the notification reports the database's own affected count ──
+-- Runs against a throwaway copy of the seed so the real UPDATE changes nothing
+-- other specs read.
+
+local function apply_and_notify(mutation_sql, run_sql)
+  local copy = vim.fn.tempname() .. ".db"
+  vim.fn.writefile(vim.fn.readfile("tests/seed_sqlite.db", "b"), copy, "b")
+  close_sessions()
+  init._mutation_preview(mutation_sql, "sqlite:" .. copy, "UPDATE", {})
+  local bufnr, session
+  for b, s in pairs(view._sessions) do
+    if s.pending_mutation then bufnr, session = b, s end
+  end
+  assert(session, "no preview grid opened")
+  session.pending_mutation.sql = run_sql or mutation_sql
+  vim.api.nvim_set_current_buf(bufnr)
+
+  local notes = {}
+  local orig_notify, orig_confirm = vim.notify, vim.fn.confirm
+  vim.notify = function(msg, level) table.insert(notes, { msg = msg, level = level }) end
+  vim.fn.confirm = function() return 1 end
+  local ok, err = pcall(function()
+    local km = require("dadbod-grip.keymaps")
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(km.defaults.grid_apply, true, false, true), "x", false)
+  end)
+  vim.notify, vim.fn.confirm = orig_notify, orig_confirm
+  close_sessions()
+  os.remove(copy)
+  assert(ok, err)
+  for _, n in ipairs(notes) do
+    if n.msg:find("executed", 1, true) then return n end
+  end
+  error("no executed notification; got: " .. vim.inspect(notes))
+end
+
+test("apply: notification shows the affected row count", function()
+  local n = apply_and_notify("UPDATE orders SET status = 'done' WHERE id = 1")
+  assert(n.msg:find("1 row affected", 1, true), n.msg)
+  eq(n.level, vim.log.levels.INFO, "INFO when it matches the preview")
+end)
+
+test("apply: a count that differs from the preview warns", function()
+  -- Previewed one row, but the statement that runs touches two.
+  local n = apply_and_notify("UPDATE orders SET status = 'done' WHERE id = 1",
+    "UPDATE orders SET status = 'done' WHERE id IN (1, 2)")
+  assert(n.msg:find("2 rows affected; preview showed 1", 1, true), n.msg)
+  eq(n.level, vim.log.levels.WARN, "WARN on a mismatch")
+end)
+
 -- ── delete on inserted row ──
 
 test("delete on inserted row removes it via undo_row", function()

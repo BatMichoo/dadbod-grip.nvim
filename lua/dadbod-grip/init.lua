@@ -205,12 +205,21 @@ local function run_statement(mutation_sql, conn, opts)
   if choice ~= 1 then return end
 
   local t0 = vim.uv.hrtime()
-  local _, exec_err = db.execute(mutation_sql, conn)
+  local res, exec_err = db.execute(mutation_sql, conn)
   local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
   if exec_err then
     vim.notify("Grip: " .. exec_err, vim.log.levels.ERROR)
   else
-    vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
+    -- Schema changes report no row count; anything else (a mutating WITH, a
+    -- BEGIN block, MERGE) does.
+    local n = res and res.affected
+    local is_ddl = stmt_type == "CREATE" or stmt_type == "ALTER" or stmt_type == "DROP"
+    if n and not is_ddl then
+      vim.notify(string.format("%s executed (%dms, %d row%s affected)",
+        stmt_type, ms, n, n == 1 and "" or "s"), vim.log.levels.INFO)
+    else
+      vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
+    end
     local history = require("dadbod-grip.history")
     history.record({ sql = mutation_sql, url = conn, type = stmt_type:lower(), elapsed_ms = ms })
     -- Refresh the grids the user can actually see. Iterating _sessions and
