@@ -98,7 +98,17 @@ end
 function M.new(query_result)
   local pks = query_result.primary_keys or {}
   local table_name = query_result.table_name
-  local readonly = (#pks == 0) or (table_name == nil) or query_result.readonly == true
+  -- Updates and deletes find their row by the key values in the result, so
+  -- every key column must be in it: a missing one drops out of the WHERE
+  -- clause, which then matches more rows than were edited, or none at all.
+  local present = {}
+  for _, col in ipairs(query_result.columns or {}) do present[col] = true end
+  local missing_pks = {}
+  for _, pk in ipairs(pks) do
+    if not present[pk] then table.insert(missing_pks, pk) end
+  end
+  local readonly = (#pks == 0) or (table_name == nil) or (#missing_pks > 0)
+    or query_result.readonly == true
   -- Why the grid is read-only, for the messages edit keys show; nil if editable.
   local readonly_reason, readonly_badge
   if query_result.readonly == true then
@@ -113,6 +123,10 @@ function M.new(query_result)
   elseif #pks == 0 then
     readonly_reason = "no primary key on " .. table_name
     readonly_badge = "read-only: no PK"
+  elseif #missing_pks > 0 then
+    readonly_reason = "the query does not select the primary key ("
+      .. table.concat(missing_pks, ", ") .. ")"
+    readonly_badge = "read-only: PK not selected"
   end
   return {
     rows = deep_copy(query_result.rows or {}),

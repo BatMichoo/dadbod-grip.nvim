@@ -67,6 +67,23 @@ test("new: editable when PKs present", function()
   eq(st.readonly, false, "should be editable")
 end)
 
+test("new: readonly when the query leaves out the primary key", function()
+  local st = make_state({ columns = { "name" }, rows = { { "alice" } } })
+  eq(st.readonly, true, "no WHERE clause to build")
+  eq(st.readonly_badge, "read-only: PK not selected")
+  eq(data.readonly_message(st), "Read-only: the query does not select the primary key (id)")
+end)
+
+test("new: readonly when the query selects only part of a composite key", function()
+  local st = make_state({
+    columns = { "order_id", "qty" },
+    rows = { { "5", "2" } },
+    primary_keys = { "order_id", "line_no" },
+  })
+  eq(st.readonly, true, "WHERE would match every line of the order")
+  eq(data.readonly_message(st), "Read-only: the query does not select the primary key (line_no)")
+end)
+
 test("new: readonly when no table_name", function()
   local st = make_state({ no_table_name = true, primary_keys = { "id" } })
   eq(st.readonly, true, "no table_name should be readonly")
