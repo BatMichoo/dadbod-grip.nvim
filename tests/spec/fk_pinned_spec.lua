@@ -352,11 +352,11 @@ test("FK round trip out of a pad query leaves that query in the pad once", funct
 
   cursor_to(bufnr, 1, "user_id")
   with_notify(function() feed(km.defaults.grid_fk_follow) end)
-  contains(pad_text(pad), [[SELECT * FROM users WHERE (]], "jump appended the FK query")
+  eq(pad_text(pad), user_sql, "jump leaves the user's query alone")
 
   with_notify(function() feed(km.defaults.grid_fk_back) end)
   eq(pad_text(pad), user_sql,
-    "coming back must restore the pad, not restate the query below itself")
+    "coming back leaves the pad holding the query once")
   cleanup_grids()
 end)
 
@@ -365,9 +365,7 @@ test("pad sync does not clobber a query the user is composing", function()
   local pad = make_pad()
   vim.api.nvim_buf_set_lines(pad, 0, -1, false, { "SELECT count(*) FROM orders" })
   grid_on_alices_orders()
-  contains(pad_text(pad), "SELECT count(*) FROM orders", "user's query kept")
-  contains(pad_text(pad), [[SELECT * FROM orders WHERE (user_id = '1')]],
-    "synced query appended below it")
+  eq(pad_text(pad), "SELECT count(*) FROM orders", "user's query kept, nothing appended")
   cleanup_grids()
 end)
 

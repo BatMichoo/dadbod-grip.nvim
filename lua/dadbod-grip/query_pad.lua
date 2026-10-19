@@ -6,9 +6,9 @@ local M = {}
 
 local _ag = vim.api.nvim_create_augroup("DadbodGripQueryPad", { clear = true })
 local _pad_bufnr = nil
--- Exact SQL text sync_query last wrote as the pad's trailing block. Lets the next
+-- Exact SQL text sync_query last wrote as the pad's whole content. Lets the next
 -- sync tell an untouched auto-synced query (replace it) from one the user edited
--- or authored (keep it, append below). nil = no auto-sync to reclaim.
+-- or authored (leave it alone). nil = no auto-sync to reclaim.
 local _last_synced = nil
 
 -- The pad is a scratch buffer: never block quitting Neovim on its edits.
@@ -22,9 +22,9 @@ vim.api.nvim_create_autocmd("ExitPre", {
   end,
 })
 
---- True for the pad's hint comment, "-- <run key>:run block or buffer  ...".
---- Matched on its shape rather than one key: the hint shows the configured
---- qpad_execute key, and pads written with the old <C-CR> default still count.
+--- True for the hint comment older versions wrote into the pad, "-- <run
+--- key>:run block or buffer  ...". The hint is virtual text now, but saved
+--- queries and notebooks can still carry the old line, so it is never run.
 local function _is_hint(line)
   return line:match("^%-%- %S+:run block or buffer") ~= nil
     or line:match("^%-%- C%-CR:") ~= nil
@@ -33,7 +33,7 @@ end
 --- Return true when `lines` contains real SQL content.
 --- Strips the hint comment (-- F5:run ...) before deciding.
 --- Blank/whitespace-only remaining lines = no real content.
---- This is the single canonical check used by sync_query and M.open.
+--- This is the single canonical check used by M.open.
 local function _has_real_content(lines)
   local real = {}
   for _, line in ipairs(lines) do
@@ -44,6 +44,26 @@ local function _has_real_content(lines)
   return table.concat(real, "\n"):match("^%s*(.-)%s*$") ~= ""
 end
 M._has_real_content = _has_real_content  -- exported for unit tests
+
+local _hint_ns = vim.api.nvim_create_namespace("grip_qpad_hint")
+
+--- Show the key hint as virtual text on line 1 while the pad has no text, and
+--- clear it as soon as anything is typed or synced in.
+local function _refresh_hint(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  vim.api.nvim_buf_clear_namespace(bufnr, _hint_ns, 0, -1)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if table.concat(lines, "\n"):match("%S") then return end
+  local run_key = (require("dadbod-grip.keymaps").get("qpad_execute") or "F5"):gsub("[<>]", "")
+  vim.api.nvim_buf_set_extmark(bufnr, _hint_ns, 0, 0, {
+    virt_text = { { "-- " .. run_key
+      .. ":run block or buffer  gn:notebooks  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
+      "Comment" } },
+    virt_text_pos = "overlay",
+  })
+end
+M._hint_ns = _hint_ns  -- exported for unit tests
+M._refresh_hint = _refresh_hint
 
 --- Get or create the query pad buffer.
 local function ensure_buf(url)
@@ -60,14 +80,15 @@ local function ensure_buf(url)
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url
-  -- Pre-fill with hint comment
-  vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- " .. (require("dadbod-grip.keymaps").get("qpad_execute") or "F5"):gsub("[<>]", "")
-      .. ":run block or buffer  gn:notebooks  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
-    "",
+  -- Key hint as virtual text while the pad is empty; on_lines sees every
+  -- change (typing, sync_query, notebook loads), extmarks can't be set inside it.
+  local bufnr = _pad_bufnr
+  _refresh_hint(bufnr)
+  vim.api.nvim_buf_attach(bufnr, false, {
+    on_lines = function()
+      vim.schedule(function() _refresh_hint(bufnr) end)
+    end,
   })
-  -- Mark buffer as not modified after creation
-  vim.bo[_pad_bufnr].modified = false
 
   -- BufWriteCmd: save query with :GripSave
   vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -168,63 +189,31 @@ local function _block_under_cursor(bufnr)
 end
 M._block_under_cursor = _block_under_cursor  -- exported for unit tests
 
---- A line that separates one runnable statement from the next: blank lines and
---- the hint comment. sync_query stacks queries separated by a
---- blank line, so a "statement" is a maximal run of non-separator lines.
-local function _is_stmt_boundary(l)
-  return l:match("^%s*$") ~= nil
-    or _is_hint(l)
-end
-
---- Return the single SQL statement to run for the cursor position. A ```sql fence
---- wins (notebook mode); otherwise the blank-line-delimited paragraph around the
---- cursor. This keeps the run key from executing the WHOLE pad — sync_query stacks a new
---- SELECT each time you jump tables, and running all of them wraps 3 statements in
---- one subquery → syntax error. Returns nil when the cursor isn't on any statement
---- (caller falls back to the full buffer, which is correct for a single query).
-local function _stmt_under_cursor(bufnr)
-  local block = _block_under_cursor(bufnr)
-  if block then return block end
-
+--- The buffer's real SQL: everything except the hint comment, trimmed. Blank
+--- lines are kept, they are part of the SQL. Returns nil when nothing real is
+--- left.
+local function _buf_content(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  if #lines == 0 then return nil end
-  local cur = vim.api.nvim_win_get_cursor(0)[1]  -- 1-based
-
-  -- Cursor on a boundary line: attach to the paragraph just above if there is
-  -- one (you just appended/landed at its end), else the next one below.
-  if _is_stmt_boundary(lines[cur]) then
-    local up = cur
-    while up >= 1 and _is_stmt_boundary(lines[up]) do up = up - 1 end
-    if up >= 1 then
-      cur = up
-    else
-      local down = cur
-      while down <= #lines and _is_stmt_boundary(lines[down]) do down = down + 1 end
-      if down > #lines then return nil end
-      cur = down
+  local real = {}
+  for _, line in ipairs(lines) do
+    if not _is_hint(line) then
+      table.insert(real, line)
     end
   end
-
-  local s = cur
-  while s > 1 and not _is_stmt_boundary(lines[s - 1]) do s = s - 1 end
-  local e = cur
-  while e < #lines and not _is_stmt_boundary(lines[e + 1]) do e = e + 1 end
-
-  local para = {}
-  for i = s, e do table.insert(para, lines[i]) end
-  local sql = table.concat(para, "\n"):match("^%s*(.-)%s*$")
-  if sql == "" then return nil end
-  return sql
+  local content = table.concat(real, "\n"):match("^%s*(.-)%s*$")
+  if content == "" then return nil end
+  return content
 end
-M._stmt_under_cursor = _stmt_under_cursor  -- exported for unit tests
 
---- The SQL the run key (qpad_execute) should run from the pad: the statement under the cursor when
---- there is one, else the whole pad (single-query case).
+--- The SQL the run key (qpad_execute) should run from the pad: the ```sql fence
+--- under the cursor (notebook mode), else the whole buffer. Blank lines never
+--- split the buffer: they are common inside and between statements, and running
+--- only the paragraph under the cursor silently dropped the rest. To run one
+--- statement out of several, select it and use the run key in visual mode.
 local function _pad_sql_to_run(bufnr)
-  local stmt = _stmt_under_cursor(bufnr)
-  if stmt and stmt:match("%S") then return stmt end
-  return M.get_content()
+  return _block_under_cursor(bufnr) or _buf_content(bufnr)
 end
+M._pad_sql_to_run = _pad_sql_to_run  -- exported for unit tests
 
 --- Scan the project root for .md and .sql files to use as notebooks.
 local function scan_notebooks()
@@ -275,13 +264,13 @@ local function setup_keymaps(bufnr, url)
     km.bind("query_pad", bufnr, action, mode, fn, opts)
   end
 
-  -- qpad_execute: statement-under-cursor takes priority; fall back to full buffer
+  -- qpad_execute: ```sql block under cursor takes priority; else the full buffer
   kmap("qpad_execute", "n", function()
     local sql = _pad_sql_to_run(bufnr)
     if sql then run_sql(cur_url(), sql) end
   end, { desc = "Grip: run query or SQL block under cursor" })
 
-  -- qpad_execute in insert mode too (same statement-under-cursor semantics)
+  -- qpad_execute in insert mode too (same block-or-buffer semantics)
   kmap("qpad_execute", "i", function()
     vim.cmd("stopinsert")
     local sql = _pad_sql_to_run(bufnr)
@@ -581,17 +570,6 @@ function M.open(url, opts)
   end
 end
 
---- Return the [start, end] 1-based line range of the pad's trailing paragraph
---- (last run of non-blank lines), or nil when there is none.
-local function _trailing_block_range(lines)
-  local e = #lines
-  while e >= 1 and lines[e]:match("^%s*$") do e = e - 1 end
-  if e < 1 then return nil end
-  local s = e
-  while s > 1 and not lines[s - 1]:match("^%s*$") do s = s - 1 end
-  return s, e
-end
-
 --- Silently sync the query pad with the SQL of the grid the user is now looking at.
 --- Two callers, both passing query.clean_sql(spec):
 ---   • init.open() — a table or query opened from outside the pad (sidebar, table
@@ -601,75 +579,28 @@ end
 --- No-op if the pad buffer doesn't exist yet.
 --- Behaviour:
 ---   • empty/hint-only pad → populate it;
----   • trailing block is the query we auto-synced last (user didn't touch it) →
----     replace it, so plain table-hopping doesn't pile up SELECTs;
----   • trailing block was edited or authored by the user → append below it, so
----     real queries are never clobbered;
----   • the pad already ends with this exact query → write nothing. An FK round trip
----     (run a query from the pad, gf away, <C-o> back) syncs that query a second
----     time; restating it would leave the pad holding it twice.
+---   • pad holds only the query we auto-synced last (user didn't touch it) →
+---     replace it, so plain table-hopping keeps one live query;
+---   • pad holds anything the user wrote or edited → leave it alone. Browsing
+---     never adds queries below the user's SQL, so the run key runs exactly what they wrote.
 function M.sync_query(sql_text)
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
   if not sql_text or sql_text:match("^%s*$") then return end
-  local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
-  local sql_lines = vim.split(sql_text, "\n")
-  vim.bo[_pad_bufnr].modifiable = true
-  -- Whether the block we leave behind is ours to replace next time. False when we
-  -- deduplicate onto a block the user authored: that one stays theirs.
-  local ours = true
-  if not _has_real_content(lines) then
-    vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
-  else
-    local ts, te = _trailing_block_range(lines)
-    local trailing = ts and table.concat(vim.list_slice(lines, ts, te), "\n") or nil
-    -- The block above the trailing one, if any: where a dedup would land.
-    local above_start, above_end
-    local above = (ts and ts > 1) and vim.list_slice(lines, 1, ts - 1) or nil
-    if above then above_start, above_end = _trailing_block_range(above) end
-    local above_text = above_start
-      and table.concat(vim.list_slice(above, above_start, above_end), "\n") or nil
-
-    if trailing == sql_text then
-      -- Already the last thing in the pad (user's own or ours): nothing to write.
-      ours = _last_synced ~= nil and trailing == _last_synced
-    elseif _last_synced ~= nil and trailing == _last_synced then
-      if above_text == sql_text then
-        -- Round trip: the query is right above our stale block. Drop the block.
-        vim.api.nvim_buf_set_lines(_pad_bufnr, above_end, -1, false, {})
-        ours = false
-      else
-        -- Untouched auto-synced query: replace it in place (keep everything above).
-        vim.api.nvim_buf_set_lines(_pad_bufnr, ts - 1, -1, false, sql_lines)
-      end
-    else
-      -- User content in the trailing block: append a new block below it.
-      local append = { "" }
-      vim.list_extend(append, sql_lines)
-      vim.api.nvim_buf_set_lines(_pad_bufnr, -1, -1, false, append)
-    end
-    local total = vim.api.nvim_buf_line_count(_pad_bufnr)
-    local win = vim.fn.bufwinid(_pad_bufnr)
-    if win ~= -1 then pcall(vim.api.nvim_win_set_cursor, win, { total, 0 }) end
+  local content = _buf_content(_pad_bufnr)
+  if content ~= nil and content ~= _last_synced then
+    _last_synced = nil  -- user-owned: never reclaim it
+    return
   end
-  _last_synced = ours and sql_text or nil
+  vim.bo[_pad_bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, vim.split(sql_text, "\n"))
+  _last_synced = sql_text
   vim.bo[_pad_bufnr].modified = false
 end
 
 --- Get the current query pad content (nil if empty or hint-only).
 function M.get_content()
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return nil end
-  local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
-  if #lines == 0 then return nil end
-  -- Filter out the hint comment line, keep real SQL
-  local real = {}
-  for _, line in ipairs(lines) do
-    if not _is_hint(line) then
-      table.insert(real, line)
-    end
-  end
-  local content = table.concat(real, "\n"):match("^%s*(.-)%s*$")
-  if content == "" then return nil end
-  return content
+  return _buf_content(_pad_bufnr)
 end
 
 --- Open a file picker for .md and .sql notebooks and load the chosen file

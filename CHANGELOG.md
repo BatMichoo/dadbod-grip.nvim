@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Query pad: the run key (`<F5>`) runs the whole buffer again (or the ```` ```sql ```` fence under the
+  cursor in notebooks). Blank lines between or inside statements no longer cut the run down
+  to the paragraph under the cursor. Select a statement and press the run key in visual mode to run just it.
+- Query pad: opening a table no longer appends its `SELECT` below SQL you wrote or edited.
+  The pad is filled only when empty, or when it still holds its own untouched query.
+- Query pad: the key hint is virtual text shown only while the pad is empty, instead of a
+  `-- F5:run ...` comment line written into the buffer.
+
 ## [3.12.0] - 2026-10-16
 
 ### Added

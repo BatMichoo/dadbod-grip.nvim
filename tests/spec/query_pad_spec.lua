@@ -55,37 +55,37 @@ do
   eq(#lines, 1, "hint pad: exactly 1 line after replace")
 end
 
--- ── sync_query: append to pad with existing content ─────────────────────────
+-- ── sync_query: user content is never touched ───────────────────────────────
+-- Browsing tables must not add queries below the user's SQL: C-CR runs the whole
+-- buffer, so anything appended would run with it.
 
 do
   local b = make_pad()
   set_lines(b, { "SELECT id FROM users" })
   qp.sync_query("SELECT * FROM orders")
   local lines = get_lines(b)
-  eq(lines[1], "SELECT id FROM users", "append: original query preserved on line 1")
-  -- blank separator + appended SQL
-  eq(lines[2], "", "append: blank separator line 2")
-  eq(lines[3], "SELECT * FROM orders", "append: new SQL on line 3")
+  eq(#lines, 1, "user content: nothing appended")
+  eq(lines[1], "SELECT id FROM users", "user content: query untouched")
+end
+
+do
+  -- user SQL with blank lines and the hint line stays exactly as written
+  local b = make_pad()
+  local mine = {
+    "-- C-CR:run  go:tables",
+    "",
+    "SELECT id, name FROM customers",
+    "",
+    "WHERE active = true",
+  }
+  set_lines(b, mine)
+  qp.sync_query("SELECT * FROM orders")
+  qp.sync_query("SELECT * FROM products")
+  eq(table.concat(get_lines(b), "\n"), table.concat(mine, "\n"),
+    "hint+content: buffer unchanged after several syncs")
 end
 
 -- ── sync_query: consecutive auto-syncs replace the last one ───────────────────
--- Plain table-hopping (no edits) must NOT pile up SELECTs. The first block here
--- is user content (set directly), so it's preserved; the auto-synced tail is
--- replaced each jump.
-
-do
-  local b = make_pad()
-  set_lines(b, { "SELECT 1" })     -- user content
-  qp.sync_query("SELECT 2")         -- differs from tail → append
-  qp.sync_query("SELECT 3")         -- tail is our own "SELECT 2" → replace it
-  local lines = get_lines(b)
-  eq(lines[1], "SELECT 1", "auto-sync: user's first block preserved")
-  eq(lines[2], "", "auto-sync: blank separator kept")
-  eq(lines[3], "SELECT 3", "auto-sync: tail replaced, not accumulated")
-  eq(#lines, 3, "auto-sync: no pile-up (3 lines, not 5)")
-end
-
--- ── sync_query: pure navigation never accumulates ─────────────────────────────
 
 do
   local b = make_pad()
@@ -98,77 +98,39 @@ do
   eq(#lines, 1, "pure-nav: exactly one query, no accumulation")
 end
 
--- ── sync_query: an edited query is preserved, next jump appends below it ───────
+-- ── sync_query: once edited, the query is the user's ──────────────────────────
 
 do
   local b = make_pad()
   set_lines(b, { "-- C-CR:run", "" })
-  qp.sync_query('SELECT * FROM "A"')                 -- auto
-  set_lines(b, { [[SELECT * FROM "A" WHERE id = 1]] })  -- user edits the tail
-  qp.sync_query('SELECT * FROM "B"')                 -- tail edited → append
-  qp.sync_query('SELECT * FROM "C"')                 -- tail is our "B" → replace
+  qp.sync_query('SELECT * FROM "A"')                     -- auto
+  set_lines(b, { [[SELECT * FROM "A" WHERE id = 1]] })  -- user edits it
+  qp.sync_query('SELECT * FROM "B"')                     -- left alone
+  qp.sync_query('SELECT * FROM "C"')                     -- still left alone
   local lines = get_lines(b)
+  eq(#lines, 1, "edited: nothing appended")
   eq(lines[1], [[SELECT * FROM "A" WHERE id = 1]], "edited: user's edit preserved")
-  eq(lines[3], 'SELECT * FROM "C"', "edited: later auto-syncs replace only the tail")
-  eq(#lines, 3, "edited: one preserved block + one live tail")
 end
 
--- ── sync_query: never restates a query the pad already ends with ─────────────
--- The FK round trip: the user runs a query from the pad, jumps away with gf (we
--- append the FK query below theirs), then <C-o> back — which syncs their original
--- query again. Restating it would leave the pad holding it twice.
-
 do
+  -- user adds to our query: the whole thing becomes theirs
   local b = make_pad()
-  set_lines(b, { "SELECT id, user_id FROM orders" })  -- user ran this from the pad
-  qp.sync_query('SELECT * FROM "users" WHERE ("id" = 1)')  -- gf: appended below
-  qp.sync_query("SELECT id, user_id FROM orders")          -- <C-o>: back to theirs
-  local lines = get_lines(b)
-  eq(#lines, 1, "round trip: the query is not duplicated")
-  eq(lines[1], "SELECT id, user_id FROM orders", "round trip: the user's query is what's left")
+  set_lines(b, {})
+  qp.sync_query('SELECT * FROM "A"')
+  set_lines(b, { 'SELECT * FROM "A"', "", "SELECT 2" })
+  qp.sync_query('SELECT * FROM "B"')
+  eq(table.concat(get_lines(b), "\n"), 'SELECT * FROM "A"\n\nSELECT 2',
+    "extended: our query plus user's addition left alone")
 end
 
 do
+  -- clearing the pad hands it back to sync
   local b = make_pad()
   set_lines(b, { "SELECT 1" })
-  qp.sync_query("SELECT 1")  -- pad already ends with exactly this
-  local lines = get_lines(b)
-  eq(#lines, 1, "already-there: nothing appended")
-  eq(lines[1], "SELECT 1", "already-there: content untouched")
-end
-
--- Dropping our block must not make us the owner of the user's block: a later
--- jump has to append below it, not overwrite it.
-do
-  local b = make_pad()
-  set_lines(b, { "SELECT id, user_id FROM orders" })
-  qp.sync_query('SELECT * FROM "users" WHERE ("id" = 1)')
-  qp.sync_query("SELECT id, user_id FROM orders")  -- dedup: our block dropped
-  qp.sync_query('SELECT * FROM "products"')        -- next jump
-  local lines = get_lines(b)
-  eq(lines[1], "SELECT id, user_id FROM orders", "ownership: user's query still there")
-  eq(lines[3], 'SELECT * FROM "products"', "ownership: new query appended below it")
-  eq(#lines, 3, "ownership: one user block + one live tail")
-end
-
--- ── sync_query: hint on line 1, real content below → append, not replace ─────
--- The pad starts with the hint comment. If the user has written SQL below it,
--- the buffer is NOT empty. sync_query must append, not clobber.
-
-do
-  local b = make_pad()
-  set_lines(b, {
-    "-- C-CR:run  go:tables",
-    "",
-    "SELECT id, name FROM customers",
-    "WHERE active = true",
-  })
+  qp.sync_query("SELECT * FROM orders")  -- user content: no-op
+  set_lines(b, {})
   qp.sync_query("SELECT * FROM orders")
-  local lines = get_lines(b)
-  eq(lines[1], "-- C-CR:run  go:tables", "hint+content: hint line preserved")
-  eq(lines[3], "SELECT id, name FROM customers", "hint+content: user query preserved")
-  local last = lines[#lines]
-  eq(last, "SELECT * FROM orders", "hint+content: new query appended at end")
+  eq(get_lines(b)[1], "SELECT * FROM orders", "cleared: empty pad is populated again")
 end
 
 -- ── sync_query: no-op on blank/whitespace sql ────────────────────────────────
@@ -314,88 +276,85 @@ do
   close_win(w)
 end
 
--- ── _stmt_under_cursor ────────────────────────────────────────────────────────
--- Regression: jumping between tables makes sync_query stack SELECTs separated by
--- a blank line. C-CR must run ONLY the statement under the cursor, not the whole
--- pad (which would wrap 3 statements in one subquery → syntax error).
+-- ── _pad_sql_to_run ──────────────────────────────────────────────────────────
+-- Regression: C-CR must run the whole buffer. Blank lines between (or inside)
+-- statements must never cut the SQL down to the paragraph under the cursor.
 
 do
-  -- three stacked queries; cursor in the second → returns only the second
+  -- blank lines between statements: cursor anywhere runs everything
   local lines = {
-    'SELECT * FROM "Organization"',
+    "CREATE TABLE t (id INT);",
     "",
-    'SELECT * FROM "OrganizationPermission"',
+    "INSERT INTO t VALUES (1);",
     "",
-    'SELECT * FROM "PartnerIntegrationOrganization"',
+    "SELECT * FROM t;",
   }
   local b, w = buf_with_cursor(lines, 3)
-  eq(qp._stmt_under_cursor(b), 'SELECT * FROM "OrganizationPermission"',
-    "stmt_under_cursor: returns only the paragraph under the cursor")
+  eq(qp._pad_sql_to_run(b), table.concat(lines, "\n"),
+    "pad_sql_to_run: blank-line-separated statements all run")
   close_win(w)
 end
 
 do
-  -- cursor on the last stacked query
+  -- blank line inside one statement (between CTEs) keeps it intact
   local lines = {
-    'SELECT * FROM "a"',
+    "WITH a AS (SELECT 1 AS x),",
     "",
-    'SELECT * FROM "b"',
+    "b AS (SELECT 2 AS x)",
+    "",
+    "SELECT * FROM a UNION ALL SELECT * FROM b",
   }
-  local b, w = buf_with_cursor(lines, 3)
-  eq(qp._stmt_under_cursor(b), 'SELECT * FROM "b"', "stmt_under_cursor: last statement")
-  close_win(w)
-end
-
-do
-  -- a single multi-line statement (no blank lines) → the whole thing
-  local lines = { "SELECT *", 'FROM "t"', "WHERE x = 1" }
-  local b, w = buf_with_cursor(lines, 2)
-  eq(qp._stmt_under_cursor(b), 'SELECT *\nFROM "t"\nWHERE x = 1',
-    "stmt_under_cursor: multi-line statement kept intact")
-  close_win(w)
-end
-
-do
-  -- cursor on the blank separator line attaches to the statement above
-  local lines = { 'SELECT * FROM "a"', "", 'SELECT * FROM "b"' }
-  local b, w = buf_with_cursor(lines, 2)
-  eq(qp._stmt_under_cursor(b), 'SELECT * FROM "a"',
-    "stmt_under_cursor: boundary line attaches to the paragraph above")
-  close_win(w)
-end
-
-do
-  -- leading blank line: cursor there attaches to the statement below
-  local lines = { "", 'SELECT * FROM "only"' }
   local b, w = buf_with_cursor(lines, 1)
-  eq(qp._stmt_under_cursor(b), 'SELECT * FROM "only"',
-    "stmt_under_cursor: leading boundary falls through to statement below")
+  eq(qp._pad_sql_to_run(b), table.concat(lines, "\n"),
+    "pad_sql_to_run: statement with inner blank lines kept whole")
   close_win(w)
 end
 
 do
-  -- the hint comment is a boundary, not part of the statement
-  local lines = { "-- C-CR:run block or buffer", 'SELECT * FROM "t"' }
-  local b, w = buf_with_cursor(lines, 2)
-  eq(qp._stmt_under_cursor(b), 'SELECT * FROM "t"',
-    "stmt_under_cursor: hint line excluded from the statement")
+  -- hint line is stripped, surrounding blanks trimmed
+  local lines = { "-- F5:run block or buffer", "", "SELECT 1;", "", "SELECT 2;", "" }
+  local b, w = buf_with_cursor(lines, 5)
+  eq(qp._pad_sql_to_run(b), "SELECT 1;\n\nSELECT 2;",
+    "pad_sql_to_run: hint excluded")
   close_win(w)
 end
 
 do
-  -- a ```sql fence still wins over paragraph detection
-  local lines = { "```sql", "SELECT 1", "```" }
-  local b, w = buf_with_cursor(lines, 2)
-  eq(qp._stmt_under_cursor(b), "SELECT 1", "stmt_under_cursor: markdown fence takes priority")
+  -- a ```sql fence under the cursor still wins (notebook mode)
+  local lines = { "# notes", "```sql", "SELECT 1", "```", "", "```sql", "SELECT 2", "```" }
+  local b, w = buf_with_cursor(lines, 3)
+  eq(qp._pad_sql_to_run(b), "SELECT 1", "pad_sql_to_run: markdown fence takes priority")
   close_win(w)
 end
 
 do
-  -- empty / hint-only buffer → nil (caller falls back to get_content)
+  -- hint-only buffer → nil
   local lines = { "-- C-CR:run block or buffer", "" }
   local b, w = buf_with_cursor(lines, 1)
-  eq(qp._stmt_under_cursor(b), nil, "stmt_under_cursor: no real statement returns nil")
+  eq(qp._pad_sql_to_run(b), nil, "pad_sql_to_run: no real SQL returns nil")
   close_win(w)
+end
+
+-- ── key hint is virtual text, only while the pad is empty ────────────────────
+
+do
+  local b = make_pad()
+  local function hints()
+    return vim.api.nvim_buf_get_extmarks(b, qp._hint_ns, 0, -1, { details = true })
+  end
+  set_lines(b, { "" })
+  qp._refresh_hint(b)
+  local marks = hints()
+  eq(#marks, 1, "hint: shown on an empty pad")
+  eq(marks[1][4].virt_text[1][1]:match(":run block or buffer") ~= nil, true,
+    "hint: virtual text names the run key")
+  eq(table.concat(get_lines(b), "\n"), "", "hint: not written into the buffer")
+  set_lines(b, { "SELECT 1" })
+  qp._refresh_hint(b)
+  eq(#hints(), 0, "hint: cleared once the pad has text")
+  set_lines(b, { "", "  " })
+  qp._refresh_hint(b)
+  eq(#hints(), 1, "hint: back when the pad is blank again")
 end
 
 -- ── quitting Neovim never asks to save the pad ──────────────────────────────

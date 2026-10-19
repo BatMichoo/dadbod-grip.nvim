@@ -644,7 +644,7 @@ SCHEMA AND WORKFLOW ~
   g!              Toggle write mode (apply overwrites local file; remote = off)
   gN              Rename column under cursor
   gw              Jump to grid window
-  q               Focus query pad (pre-fills if empty; appends if pad has content)
+  q               Focus query pad (pre-fills if empty; never touches your SQL)
   gh              Query history browser
 
 VISUAL MODE ~
@@ -887,7 +887,7 @@ Schema browser keymaps:
   y               Yank table or column name to clipboard
   go              Open table under cursor, ORDER BY latest (created_at / PK DESC)
   gT / gt         Table picker (fuzzy finder)
-  q               Focus query pad (pre-fills if empty; appends if pad has content)
+  q               Focus query pad (pre-fills if empty; never touches your SQL)
   gq              Load saved query (picker with SQL preview)
   gw              Jump to grid window
   gC / gc         Switch database connection
@@ -921,12 +921,14 @@ Open with `:GripQuery` or `q` from the grid or schema sidebar. Creates a
 persistent scratch SQL buffer with filetype=sql.
 
 Content protection: pressing `q` or `2` focuses the pad without replacing
-anything. Clicking a table in the sidebar or picker appends the new query
-below existing SQL with a blank separator. The pad is only pre-filled when
-it is empty (or contains only the hint comment). Your work is never lost.
+anything. Opening a table (sidebar, picker, FK jumps) fills the pad only
+when it is empty, or swaps in the new query when the pad still holds the one
+it filled in and you have not edited it. Once the pad holds SQL you wrote or
+edited, browsing never changes it. Your work is never lost.
 
 `<F5>` in visual mode runs only the selected lines. In normal or insert
-mode it runs the blank-line-delimited SQL block under the cursor.
+mode it runs the whole buffer, blank lines included (in a markdown notebook,
+the ```sql block under the cursor).
 
 Grip provides no SQL completion. The pad sets `b:db` to the connection URL,
 so an external completion plugin such as vim-dadbod-completion can supply

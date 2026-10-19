@@ -173,7 +173,7 @@ test("clipboard import documentation keeps its staging boundary", function()
 end)
 
 test("query-pad and SQL Server temp-table scope stay accurate", function()
-  assert(help:find("blank-line-delimited SQL block under the cursor", 1, true),
+  assert(help:find("mode it runs the whole buffer, blank lines included", 1, true),
     "query-pad block behavior missing")
   assert(help:find("Create and use #temp\nor ##temp tables in the same submitted block or visual selection", 1, true),
     "SQL Server temp-table session boundary missing")
