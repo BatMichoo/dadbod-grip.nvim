@@ -55,4 +55,13 @@ vim.g.clipboard = {
   cache_enabled = 0,
 }
 
+-- Per-project state (connections, history, filters, saved queries) lives under
+-- stdpath("state"). Point it at a throwaway directory so a test run never
+-- writes into the developer's real state folder.
+if not vim.g.grip_test_state_home then
+  vim.g.grip_test_state_home = vim.fn.tempname() .. "-grip-state"
+  vim.fn.mkdir(vim.g.grip_test_state_home, "p")
+  vim.env.XDG_STATE_HOME = vim.g.grip_test_state_home
+end
+
 -- Do not call setup() for pure module tests

@@ -1150,7 +1150,7 @@ function M.execute(sql_str, url)
 end
 
 --- Resolve relative file paths in a DSN to absolute paths.
---- "sqlite:.grip/foo.db" -> "sqlite:/abs/path/.grip/foo.db"
+--- "sqlite:data/foo.db" -> "sqlite:/abs/path/data/foo.db"
 --- "postgres:dbname=x" -> "postgres:dbname=x" (unchanged, no file path)
 local function resolve_dsn_path(dsn)
   local prefix, path = dsn:match("^(sqlite:)(.*)")

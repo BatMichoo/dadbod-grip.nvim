@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Per-project state (`connections.json`, `history.jsonl`, `filters.json`, `queries/`) moves out of
+  the repository's `.grip/` folder into `stdpath("state")/grip/projects/<name>-<hash>`
+  (`~/.local/state/nvim/` on Linux, `%LOCALAPPDATA%\nvim-data\` on Windows), so nothing needs adding
+  to `.gitignore`. An existing `.grip/` folder is no longer read; move its files across by hand to keep
+  them. The project root is the nearest `.git`; `.grip` is no longer a root marker. The global
+  `~/.grip/connections.json` and the `connections_path` option are unchanged. See `:h grip-project-state`.
+
 ### Fixed
 
 - Query pad: the run key (`<F5>`) runs the whole buffer again (or the ```` ```sql ```` fence under the

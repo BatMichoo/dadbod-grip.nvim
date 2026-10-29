@@ -517,7 +517,7 @@ function M.pick(opts)
         end,
       },
       {
-        -- s: save a local file as a named connection in .grip/connections.json.
+        -- s: save a local file as a named connection in the project connections.json.
         key            = "s",
         label          = "s:save",
         close_on_select = true,
@@ -533,7 +533,5 @@ function M.pick(opts)
     },
   })
 end
-
---- Expose the .grip/ directory path for other modules (schema catalog, etc.).
 
 return M

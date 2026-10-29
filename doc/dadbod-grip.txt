@@ -350,7 +350,8 @@ All commands are global and available after the plugin loads.
 
                                                                  *:GripSave*
 :GripSave [name]
-  Save the current query pad content to .grip/queries/{name}.sql.
+  Save the current query pad content to {state}/queries/{name}.sql
+  (see |grip-project-state|).
   Prompts for a name if not provided.
 
                                                                  *:GripLoad*
@@ -361,7 +362,7 @@ All commands are global and available after the plugin loads.
                                                               *:GripConnect*
 :GripConnect [url]
   Switch database connection. Shows a picker if no argument is provided.
-  Reads from .grip/connections.json, g:dbs (DBUI compatible), and
+  Reads from {state}/connections.json, g:dbs (DBUI compatible), and
   $DATABASE_URL.
 
                                                               *:GripExplain*
@@ -387,7 +388,7 @@ All commands are global and available after the plugin loads.
                                                               *:GripHistory*
 :GripHistory
   Browse query history. Every query executed via :Grip, the query pad,
-  and staged DML is recorded in .grip/history.jsonl. Shows a floating
+  and staged DML is recorded in {state}/history.jsonl. Shows a floating
   picker with timestamp and SQL preview. Selecting an entry opens it in
   the query pad for review and re-execution.
 
@@ -433,7 +434,7 @@ All commands are global and available after the plugin loads.
     :GripAttach mysql:host=db.internal user=reader database=shop  shop
     :GripAttach md:shared_analytics  cloud
 <
-  Attachments persist in .grip/connections.json under the parent connection
+  Attachments persist in {state}/connections.json under the parent connection
   and are restored on reconnect.
 
                                                               *:GripDetach*
@@ -793,7 +794,7 @@ never bakes it into a preset. Use `<C-o>` to leave an FK context.
 
 Filter presets ~
 Press `gP` to save the current active filters as a named preset for the
-current table. Presets are stored in `.grip/filters.json` keyed by table
+current table. Presets are stored in `{state}/filters.json` keyed by table
 name. Press `gp` to load a saved preset using the grip_picker float.
 
 Rows ~
@@ -951,21 +952,36 @@ Query pad keymaps:
 ==============================================================================
 12. SAVED QUERIES                                      *grip-saved-queries*
 
-Save queries to project-local .grip/queries/ directory:
+Save queries to the project's {state}/queries/ directory:
 
-  :GripSave report        saves to .grip/queries/report.sql
-  :GripLoad report        loads .grip/queries/report.sql
+  :GripSave report        saves to {state}/queries/report.sql
+  :GripLoad report        loads {state}/queries/report.sql
   :GripLoad               shows picker of saved queries
 
+Project state ~
+                                                        *grip-project-state*
+Per-project files (connections.json, history.jsonl, filters.json and
+queries/) live outside the repository, so nothing needs adding to
+.gitignore. {state} in this help stands for:
+
+  stdpath("state")/grip/projects/{name}-{hash}
+
+{name} is the project root's folder name and {hash} the first 8 hex
+characters of the SHA-256 of its absolute path. On Linux that is under
+~/.local/state/nvim/, on Windows under %LOCALAPPDATA%\nvim-data\.
+
 The project root is detected by walking up from the current directory
-looking for .git or .grip directories.
+looking for .git (a directory, or the file a worktree or submodule has).
+Without one the current directory is the root. Moving or renaming a
+project changes its {hash}; move the old {state} directory along with it
+to keep its connections, history and saved queries.
 
 ==============================================================================
 13. CONNECTIONS                                          *grip-connections*
 
 `:GripConnect` manages database connections from multiple sources:
 
-  .grip/connections.json     project-local profiles (new connections save here)
+  {state}/connections.json   project profiles (new connections save here)
   ~/.grip/connections.json   global profiles (shared across all projects)
   g:dbs                      vim-dadbod-ui compatible table (auto-saves to global)
   $DATABASE_URL              environment variable
@@ -980,7 +996,7 @@ or add a new one interactively.
 Connections are deduplicated by URL across all sources. The order is:
 
   1. discovered Docker containers
-  2. .grip/connections.json          (project)
+  2. {state}/connections.json        (project)
   3. ~/.grip/connections.json        (global)
   4. g:dbs
   5. $DATABASE_URL
@@ -1000,7 +1016,7 @@ Docker stack happened to be up.
 Connection scope ~
 
 New connections added via the picker save to the project-local file
-(.grip/connections.json). To make a connection available in every project,
+({state}/connections.json). To make a connection available in every project,
 press `G` on it in the picker to copy it to ~/.grip/connections.json.
 
 Both files are merged when the picker opens. When at least one global
@@ -1022,7 +1038,7 @@ supported data files and shows them in a "Local Files (cwd)" section.
 Supported extensions: .parquet .csv .tsv .json .ndjson .jsonl .xlsx .orc .arrow .ipc
 
 Selecting a file opens it connect-once (no save). Press `s` in the picker to
-save the file as a named connection in .grip/connections.json.
+save the file as a named connection in {state}/connections.json.
 
 Connection health ~
 
@@ -1416,14 +1432,14 @@ grip.open_smart()
 18. QUERY HISTORY                                            *grip-history*
 
 Every query executed through :Grip, the query pad, and staged DML is
-recorded in .grip/history.jsonl. Each entry includes the SQL, timestamp,
+recorded in {state}/history.jsonl. Each entry includes the SQL, timestamp,
 connection URL, table name, query type, and execution time.
 
 Browse history with `:GripHistory` or `gh` from a grid buffer. The floating
 picker shows timestamp, elapsed ms, and SQL preview. Selecting an entry
 opens it in the query pad for review and re-execution.
 
-History is stored per-project (relative to .grip/ directory) and grows
+History is stored per-project (see |grip-project-state|) and grows
 as an append-only JSONL file.
 
 ==============================================================================
@@ -1525,7 +1541,7 @@ Extensions are managed automatically. Attaching a postgres: DSN installs
 and loads postgres_scanner. Attaching mysql: or mariadb: loads mysql_scanner.
 Attaching sqlite: loads sqlite_scanner. Attaching md: loads motherduck.
 
-Attachments persist in .grip/connections.json under the parent DuckDB
+Attachments persist in {state}/connections.json under the parent DuckDB
 connection. They restore automatically when you reconnect.
 
 Sidebar keymaps for federation (DuckDB connections only):

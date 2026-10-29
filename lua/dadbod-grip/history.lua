@@ -1,5 +1,5 @@
 -- history.lua -- query history with JSONL storage.
--- Stores in .grip/history.jsonl. Picker uses grip_picker (zero external deps).
+-- Stores in the project state dir (paths.grip_dir()/history.jsonl). Picker uses grip_picker (zero external deps).
 
 local paths = require("dadbod-grip.paths")
 local sql_util = require("dadbod-grip.sql")

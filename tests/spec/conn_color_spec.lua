@@ -252,7 +252,7 @@ local function with_real_file(fn)
   package.loaded["dadbod-grip.connections"] = nil
   connections = require("dadbod-grip.connections")
 
-  local ok, err = pcall(fn, project_dir .. "/.grip")
+  local ok, err = pcall(fn, paths.grip_dir())
   vim.wait(50) -- flush any vim.schedule() callbacks queued by switch()
 
   paths.project_root = orig_project_root

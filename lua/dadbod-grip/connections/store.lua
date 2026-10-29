@@ -93,7 +93,7 @@ local function read_file_connections()
   return result
 end
 
---- Write connections to .grip/connections.json.
+--- Write connections to the project connections.json.
 --- Deduplicates by URL before writing, keeping the entry with the highest
 --- last_used timestamp. This self-heals files bloated by historical bugs.
 local function write_file_connections(conns)

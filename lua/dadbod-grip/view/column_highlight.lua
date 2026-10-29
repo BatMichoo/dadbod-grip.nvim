@@ -42,10 +42,10 @@ function M.setup(bufnr, ctx)
       vim.api.nvim_buf_clear_namespace(bufnr, col_hl_ns, 0, -1)
       if not col_name then return end
 
-      -- Highlight header row (extmark rows are 0-based)
+      -- Highlight header row (line 2 = index 1)
       local hdr_bp = r.hdr_byte_positions and r.hdr_byte_positions[col_name]
       if hdr_bp then
-        vim.api.nvim_buf_set_extmark(bufnr, col_hl_ns, (r.hdr_row or 3) - 1, hdr_bp.start, {
+        vim.api.nvim_buf_set_extmark(bufnr, col_hl_ns, 1, hdr_bp.start, {
           end_col = hdr_bp.finish + 1,
           hl_group = "GripColHighlight",
           priority = 50,
@@ -53,7 +53,7 @@ function M.setup(bufnr, ctx)
       end
 
       -- Highlight all data rows
-      local ds = r.data_start or 5
+      local ds = r.data_start or 4
       local ordered = r.ordered or {}
       for i = 1, #ordered do
         local bp_row = r.byte_positions and r.byte_positions[i]

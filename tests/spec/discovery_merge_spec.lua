@@ -61,7 +61,7 @@ local function with_real_file(discovered, fn)
   package.loaded["dadbod-grip.connections"] = nil
   connections = require("dadbod-grip.connections")
 
-  local ok, err = pcall(fn, project_dir .. "/.grip")
+  local ok, err = pcall(fn, paths.grip_dir())
 
   paths.project_root = orig_project_root
   vim.fn.expand = orig_expand

@@ -92,7 +92,7 @@ local function with_real_file(fn)
   connections = require("dadbod-grip.connections")
   secrets.clear_cache()
 
-  local local_grip = project_dir .. "/.grip"
+  local local_grip = paths.grip_dir()
   local env_path = project_dir .. "/.env"
   paths.ensure_dir(local_grip)
   local ok, err = pcall(fn, local_grip, env_path)

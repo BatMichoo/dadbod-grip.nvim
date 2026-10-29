@@ -1,5 +1,5 @@
 -- filters.lua -- saved filter presets per table.
--- Stored in .grip/filters.json keyed by table name.
+-- Stored in the project state dir (paths.grip_dir()/filters.json) keyed by table name.
 -- Picker uses grip_picker (zero external deps).
 
 local ui    = require("dadbod-grip.ui")

@@ -255,7 +255,7 @@ end
 ---
 --- Every public db.* function funnels through here, which makes this the one
 --- and only place where a "${VAR}" template becomes a real URL carrying a
---- real password. vim.g.db, vim.b.db, .grip/connections.json and the query
+--- real password. vim.g.db, vim.b.db, connections.json and the query
 --- history all keep the template, so no write path anywhere in the plugin is
 --- ever handed a secret it could spill -- not because each of them scrubs,
 --- but because none of them ever holds one. Keep it that way: expanding

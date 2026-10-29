@@ -85,7 +85,7 @@ You can also connect directly:
 :GripConnect sqlserver://user:password@localhost:1433/app
 ```
 
-New connections save to `.grip/connections.json` in the project. Press `G` in the connection picker to promote a connection to `~/.grip/connections.json`, where it becomes available across projects. Existing `g:dbs`, `$DATABASE_URL`, `g:db`, and labeled local Docker containers also appear in the picker.
+New connections save to a per-project `connections.json` under Neovim's state directory (`stdpath("state")/grip/projects/`), so nothing lands in the repository. Press `G` in the connection picker to promote a connection to `~/.grip/connections.json`, where it becomes available across projects. Existing `g:dbs`, `$DATABASE_URL`, `g:db`, and labeled local Docker containers also appear in the picker.
 
 To keep a password out of the connection file, use an environment placeholder:
 

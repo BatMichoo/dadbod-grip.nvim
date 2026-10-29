@@ -1,5 +1,5 @@
 -- connections.lua: connection profile management.
--- Reads from .grip/connections.json, g:dbs (DBUI compat), $DATABASE_URL.
+-- Reads from the project connections.json (paths.grip_dir()), g:dbs (DBUI compat), $DATABASE_URL.
 -- All functions return (result, err). Never throw.
 
 local paths = require("dadbod-grip.paths")
@@ -511,7 +511,7 @@ function M.get_health(url)
   return _health[url] or "unknown"
 end
 
---- Add (or rename) a connection in .grip/connections.json.
+--- Add (or rename) a connection in the project connections.json.
 --- Upsert by URL: if the URL already exists, updates name and type in place,
 --- preserving last_used and attachments. Prevents accumulation of duplicates
 --- and correctly handles "rename on next switch" (e.g. vim.g.db → proper name).
@@ -531,7 +531,7 @@ function M.touch(url)
   end
 end
 
---- Remove a connection from .grip/connections.json. Matches by URL when one is
+--- Remove a connection from the project connections.json. Matches by URL when one is
 --- given, since grouped connections often share a name ("billing" in DEV and
 --- in QA); by name otherwise.
 function M.remove(name, url)
@@ -548,7 +548,7 @@ end
 
 --- Switch active connection. Routes file connections through grip.open(),
 --- DB connections through vim.g.db + workspace open.
---- Auto-saves to .grip/connections.json if not already persisted.
+--- Auto-saves to the project connections.json if not already persisted.
 --- opts: { write = bool, watch_ms = number, mode = "ro"|"rw" }: session-only,
 --- never persisted.
 --- @return boolean committed  false when the switch aborted and nothing changed
@@ -812,7 +812,7 @@ function M.current()
 end
 
 --- Persist attachments for a DuckDB connection URL.
---- Called after attach/detach to update .grip/connections.json.
+--- Called after attach/detach to update the project connections.json.
 ---
 --- `url` is the connection URL as stored (templated), since that is the key
 --- the entry lives under on disk; the live adapter registry is keyed by the

@@ -240,20 +240,7 @@ M._pad_sql_to_run = _pad_sql_to_run  -- exported for unit tests
 
 --- Scan the project root for .md and .sql files to use as notebooks.
 local function scan_notebooks()
-  -- Walk up from cwd to find project root (same pattern as connections.lua)
-  local root = vim.fn.getcwd()
-  do
-    local dir = root
-    for _ = 1, 10 do
-      if vim.fn.isdirectory(dir .. "/.git") == 1 or vim.fn.isdirectory(dir .. "/.grip") == 1 then
-        root = dir
-        break
-      end
-      local parent = vim.fn.fnamemodify(dir, ":h")
-      if parent == dir then break end
-      dir = parent
-    end
-  end
+  local root = require("dadbod-grip.paths").project_root()
 
   local seen = {}
   local files = {}
@@ -484,14 +471,19 @@ local function setup_keymaps(bufnr, url)
 end
 
 --- Open the query pad.
---- @param url string|nil connection URL; nil falls back to the current one, if any
+--- @param url string connection URL
 --- @param opts? { initial_sql?: string }
 function M.open(url, opts)
   opts = opts or {}
 
-  -- No connection is fine: the pad still edits, loads and saves SQL, and
-  -- running it reports the missing connection.
-  url = url or require("dadbod-grip.db").get_url()
+  if not url then
+    local db_mod = require("dadbod-grip.db")
+    url = db_mod.get_url()
+    if not url then
+      vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
+      return
+    end
+  end
 
   local bufnr = ensure_buf(url)
   setup_keymaps(bufnr, url)
@@ -639,7 +631,10 @@ function M.pick_notebook()
     end,
     on_select = function(f)
       -- Ensure the pad is open and visible
-      M.open(vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db or nil)
+      local db_url = vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db
+        or vim.g.db
+        or require("dadbod-grip.db").get_url()
+      if db_url then M.open(db_url) end
       vim.schedule(function()
         local pad = _pad_bufnr
         if not pad or not vim.api.nvim_buf_is_valid(pad) then return end

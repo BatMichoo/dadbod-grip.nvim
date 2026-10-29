@@ -179,7 +179,7 @@ local LONG_RO_NAME = "prod-warehouse-readonly"
 local function with_connections(initial_url, fn)
   local project_dir = vim.fn.tempname() .. "_grip_ro_test"
   local fake_home = project_dir .. "_home"
-  vim.fn.mkdir(project_dir .. "/.grip", "p")
+  vim.fn.mkdir(project_dir, "p")
   vim.fn.mkdir(fake_home .. "/.grip", "p")
 
   local orig_project_root = paths.project_root
@@ -190,6 +190,7 @@ local function with_connections(initial_url, fn)
   local orig_opts = grip.get_opts()
 
   paths.project_root = function() return project_dir end
+  vim.fn.mkdir(paths.grip_dir(), "p")
   vim.fn.expand = function(a, ...)
     if a == "~" then return fake_home end
     return orig_expand(a, ...)
@@ -208,7 +209,7 @@ local function with_connections(initial_url, fn)
     { name = "locked-db", url = UNRESOLVABLE_URL, type = "postgresql", mode = "ro" },
     { name = "templated-db", url = TEMPLATED_URL, type = "postgresql", mode = "ro" },
     { name = LONG_RO_NAME, url = LONG_RO_URL, type = "postgresql", mode = "ro" },
-  }) }, project_dir .. "/.grip/connections.json")
+  }) }, paths.grip_dir() .. "/connections.json")
   vim.g.db = initial_url
   vim.b.db = nil
 
@@ -850,7 +851,7 @@ test("the RO column costs nothing when no entry is read-only", function()
       { name = "rw-db",      url = RW_URL,      type = "postgresql", mode = "rw" },
       { name = "bare-db",    url = BARE_URL,    type = "postgresql" },
       { name = LONG_RO_NAME, url = LONG_RO_URL, type = "postgresql", mode = "rw" },
-    }) }, paths.project_root() .. "/.grip/connections.json")
+    }) }, paths.grip_dir() .. "/connections.json")
     local without, _, rw_again = picker_action(connections, "r", "rw-db")
     eq(#with_ro.display(rw_item) - #without.display(rw_again), 3,
       "no ro entry, no column: [" .. with_ro.display(rw_item) .. "] vs ["

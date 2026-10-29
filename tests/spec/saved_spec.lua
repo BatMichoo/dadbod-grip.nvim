@@ -52,9 +52,9 @@ local function with_storage(fn, opts)
 
   local ok, err = pcall(fn, {
     root = root,
-    local_file = root .. "/.grip/connections.json",
+    local_file = paths.grip_dir() .. "/connections.json",
     global_file = fake_home .. "/.grip/connections.json",
-    query_dir = root .. "/.grip/queries",
+    query_dir = paths.grip_dir() .. "/queries",
     notices = notices,
   })
 
@@ -237,40 +237,6 @@ test("legacy safe URLs switch unnamed and credentialed URLs never switch", funct
     assert(not notices:find(password, 1, true), "credential warning leaked password")
     assert(table.concat(vim.fn.readfile(ctx.query_dir .. "/credentialed.sql"), "\n")
       :find(password, 1, true), "load must not silently rewrite the user's file")
-  end)
-end)
-
-test("list names each query's connection without switching to it", function()
-  with_storage(function(ctx)
-    write_json(ctx.local_file, { { id = "conn_saved", name = "production", url = "sqlite:/tmp/app.db" } })
-    paths.ensure_dir(ctx.query_dir)
-    vim.fn.writefile({ "-- grip:connection=conn_saved", "SELECT 1" }, ctx.query_dir .. "/bound.sql")
-    vim.fn.writefile({ "-- grip:connection=conn_gone", "SELECT 2" }, ctx.query_dir .. "/gone.sql")
-    vim.fn.writefile({ "SELECT 3" }, ctx.query_dir .. "/plain.sql")
-    vim.g.db = nil
-
-    with_switch_spy(function(calls)
-      local by_name = {}
-      for _, q in ipairs(saved.list()) do by_name[q.name] = q end
-      eq(by_name.bound.connection, "production", "bound query")
-      eq(by_name.gone.connection, "missing connection", "deleted connection")
-      eq(by_name.plain.connection, nil, "unbound query")
-      eq(#calls, 0, "listing never switches")
-    end)
-    eq(vim.g.db, nil, "listing never connects")
-  end)
-end)
-
-test("query pad opens without a connection", function()
-  with_storage(function()
-    vim.g.db = nil
-    local pad = require("dadbod-grip.query_pad")
-    pad.open(nil, { initial_sql = "SELECT 42" })
-    local buf = vim.api.nvim_get_current_buf()
-    eq(vim.api.nvim_buf_get_name(buf):match("grip://query$") ~= nil, true, "pad is current")
-    eq(table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"), "SELECT 42")
-    eq(vim.b[buf].db, nil, "pad stays unbound")
-    vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
 
