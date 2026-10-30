@@ -170,6 +170,9 @@ test("all-row export is complete and atomically written", function()
 end)
 
 if URL:match("^sqlserver://") or URL:match("^mssql://") then
+  -- minimal_init.lua turns pooling off for every spec; these tests cover the pool.
+  require("dadbod-grip.config").values.sqlserver_pool = true
+
   test("SQL Server temporary tables share one submission", function()
     local name = "##grip_live_temp_scope"
     local result, err = db.query(table.concat({

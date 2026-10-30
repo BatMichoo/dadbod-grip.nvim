@@ -116,7 +116,9 @@ local function sqlcmd_args(parsed)
     "-s", "\t",
     -- Without -b sqlcmd exits 0 even when the server rejects the statement, so
     -- every `code ~= 0` guard below would be dead and a refused DROP would be
-    -- reported as a success.
+    -- reported as a success. The connection pool drops it and reads the error
+    -- headers instead, so an error does not end the pooled session (see
+    -- sqlserver_pool.lua).
     "-b",
   }
 
