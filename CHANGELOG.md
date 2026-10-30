@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- SQL Server: connections are pooled. One sqlcmd process stays open per connection, so repeated
+  queries skip the login and TLS handshake, which makes Azure SQL with Entra ID much faster. `#temp`
+  tables and `SET` options now persist between submissions while the session lives; open
+  transactions are still rolled back after each one. A query error no longer ends the session.
+  Sessions close when their last tab closes, on exit, or after `sqlserver_pool_idle_timeout`
+  (5 minutes by default). Set `sqlserver_pool = false` for one session per submission.
+  See `:h grip-sqlserver-pool`.
+
 ### Changed
 
 - Per-project state (`connections.json`, `history.jsonl`, `filters.json`, `queries/`) moves out of

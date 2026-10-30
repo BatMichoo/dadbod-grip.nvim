@@ -1380,10 +1380,20 @@ ActiveDirectoryDefault reuses an `az login` session:
 Without authentication= and without a user, sqlcmd uses integrated (-E)
 authentication as before.
 
-Each SQL Server submission starts a new sqlcmd session. Create and use #temp
-or ##temp tables in the same submitted block or visual selection. GO-separated
-batches in one submission share that session, but temporary tables do not
-persist into the next submission.
+                                                         *grip-sqlserver-pool*
+SQL Server connections are pooled: grip keeps one sqlcmd process open per
+connection and sends each submission to it, so repeated queries skip the
+login and TLS handshake (most noticeable on Azure SQL with Entra ID). As a
+result, #temp tables and SET options persist from one submission to the next
+while the session lives. After every submission grip rolls back any
+transaction left open, so transactions do not carry over.
+
+A pooled session ends when the last tab that used it closes, when Neovim
+exits, after sqlserver_pool_idle_timeout of inactivity, or when the server
+drops the connection (a severity 20+ error). A query error, such as a missing
+table or a syntax error, does not end it. Set sqlserver_pool = false to start
+a new sqlcmd session per submission; temporary tables then persist only
+within one submitted block.
 
 DuckDB federation: attach external databases via :GripAttach. Supports
 PostgreSQL (postgres_scanner), MySQL/MariaDB (mysql_scanner), SQLite
@@ -1411,6 +1421,13 @@ grip.setup({opts})
                             nvarchar(max), xml and similar columns, 0 for
                             unlimited. Default: nil (sqlcmd's own 256).
                             go-sqlcmd only; mssql-tools sqlcmd ignores it.
+    sqlserver_pool (boolean)
+                            Reuse one sqlcmd process per SQL Server
+                            connection. Default: true
+                            See |grip-sqlserver-pool|
+    sqlserver_pool_idle_timeout (number)
+                            Close a pooled SQL Server session after this
+                            many ms without queries. Default: 300000
 
                                                            *grip.open()*
 grip.open({arg}, {url}, {opts})

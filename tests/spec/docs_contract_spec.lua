@@ -175,10 +175,13 @@ end)
 test("query-pad and SQL Server temp-table scope stay accurate", function()
   assert(help:find("mode it runs the whole buffer, blank lines included", 1, true),
     "query-pad block behavior missing")
-  assert(help:find("Create and use #temp\nor ##temp tables in the same submitted block or visual selection", 1, true),
-    "SQL Server temp-table session boundary missing")
-  assert(help:find("GO-separated\nbatches in one submission share that session", 1, true),
-    "SQL Server same-invocation GO behavior missing")
+  local flat = help:gsub("%s+", " ")
+  assert(flat:find("#temp tables and SET options persist from one submission to the next", 1, true),
+    "SQL Server pooled session scope missing")
+  assert(flat:find("transactions do not carry over", 1, true),
+    "SQL Server pooled transaction boundary missing")
+  assert(flat:find("Set sqlserver_pool = false to start a new sqlcmd session per submission", 1, true),
+    "SQL Server one-shot session opt-out missing")
 end)
 
 test("contributor and vulnerability paths remain actionable", function()

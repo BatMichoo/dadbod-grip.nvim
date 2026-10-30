@@ -182,25 +182,22 @@ local function sqlcmd_env(parsed)
   return { SQLCMDPASSWORD = parsed.pass or "" }
 end
 
---- Build and run the sqlcmd command, blocking. Routes through the connection
+--- Feed a script to sqlcmd on stdin, blocking. Routes through the connection
 --- pool if pooling is enabled; otherwise falls back to one-shot via run_cmd.
-local function sqlcmd(parsed, sql_str, timeout_ms, opts)
-  local pool = require("dadbod-grip.adapters.sqlserver_pool")
-  local script = sqlcmd_stdin(sql_str, opts)
-  return pool.run(pool.key_for(parsed), parsed, script,
+local function run_script(parsed, script, timeout_ms)
+  return require("dadbod-grip.adapters.sqlserver_pool").run(parsed, script,
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     sqlcmd_args, sqlcmd_env)
 end
 
+local function sqlcmd(parsed, sql_str, timeout_ms, opts)
+  return run_script(parsed, sqlcmd_stdin(sql_str, opts), timeout_ms)
+end
+
 --- Run GO-separated batches by feeding them to sqlcmd on stdin. `-Q` can only
 --- carry one batch, and SET SHOWPLAN_TEXT has to be alone in its own.
---- Routes through the connection pool if pooling is enabled.
 local function sqlcmd_batch(parsed, batches, timeout_ms)
-  local pool = require("dadbod-grip.adapters.sqlserver_pool")
-  local script = table.concat(batches, "\nGO\n") .. "\nGO\n"
-  return pool.run(pool.key_for(parsed), parsed, script,
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    sqlcmd_args, sqlcmd_env)
+  return run_script(parsed, table.concat(batches, "\nGO\n") .. "\nGO\n", timeout_ms)
 end
 
 --- Message for a non-zero sqlcmd exit. With -b the server's "Msg 208, ..." text

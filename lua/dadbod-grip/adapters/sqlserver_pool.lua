@@ -7,17 +7,26 @@ local M = {}
 local adapters = require("dadbod-grip.adapters")
 local config = require("dadbod-grip.config")
 
--- Pool entries: key -> { obj, buf, stderr_buf, busy, dead, tabs, idle_timer, batch_counter, identity }
+-- Pool entries: key -> entry (see spawn_process for the fields).
 local _pool = {}
 
--- Lazily-created autocmd group for TabClosed, VimLeavePre, etc.
+-- Lazily-created autocmd group for TabClosed and VimLeavePre.
 local _ag = nil
 
 -- Injection point for unit tests: allows a fake vim.system(...) spawner.
 local _spawner = nil
 
--- Build a unique key for a parsed connection (host/port/dbname/user/auth/encrypt/trust/cert).
--- Notably excludes password to avoid making the secret a map key.
+-- How long a closed process gets to exit on stdin EOF before SIGKILL.
+local CLOSE_GRACE_MS = 2000
+
+-- Server error header as both clients print it. Anchored to a whole line with
+-- no tabs, so a multi-column result row (-s "\t") cannot match.
+local ERROR_HEADER = "^Msg %d+, Level (%d+), State %d+, Server [^\t,]+, [^\t]*Line %d+\r?\n$"
+
+-- Build a unique key for a parsed connection (host/port/dbname/user/auth/
+-- encrypt/trust/cert/password). The password goes in as a hash, so the secret
+-- is never a map key, yet a connection with a different password cannot run
+-- on a session another password opened.
 function M.key_for(parsed)
   return table.concat({
     parsed.host or "",
@@ -28,16 +37,8 @@ function M.key_for(parsed)
     parsed.encrypt or "",
     tostring(parsed.trust_server_certificate or false),
     parsed.server_certificate or "",
+    parsed.pass and vim.fn.sha256(parsed.pass) or "",
   }, "\1")
-end
-
--- Extract stdout up to and including the sentinel token.
--- Returns (stdout_before_sentinel, found) where found = true if sentinel was found.
-function M._extract_until_sentinel(buffer, token)
-  local idx = buffer:find(token, 1, true)
-  if not idx then return buffer, false end
-  local before = buffer:sub(1, idx - 1)
-  return before, true
 end
 
 -- Introspect the live pool registry (test/diagnostic use only).
@@ -45,21 +46,33 @@ function M._entries()
   return _pool
 end
 
--- Test seam: inject a fake vim.system spawner. fn receives (args, opts) and
--- returns a mock SystemObj with write(data), kill(sig), and an on_exit callback.
+-- Test seam: inject a fake vim.system spawner. fn receives (args, opts,
+-- on_exit) and returns a mock SystemObj with write(data) and kill(sig).
 function M._set_spawner(fn)
   _spawner = fn
 end
 
--- Kill a pool entry: SIGTERM -> wait -> SIGKILL. Never raises.
-local function kill_entry(entry)
+-- Stop using an entry: drop it from the pool and end its process. graceful
+-- closes stdin so sqlcmd logs out and exits on its own, with SIGKILL as a
+-- deferred fallback; otherwise (timeout, desync) the process is killed now.
+local function close_entry(entry, graceful)
+  if entry.idle_timer then
+    entry.idle_timer:stop()
+    entry.idle_timer:close()
+    entry.idle_timer = nil
+  end
+  if _pool[entry.key] == entry then _pool[entry.key] = nil end
+  entry.busy = false
+  entry.closed = true
   if entry.dead then return end
-  pcall(entry.obj.kill, entry.obj, "sigterm")
-  vim.wait(2000, function() return entry.dead end, 10)
-  if not entry.dead then
+  if graceful then
+    pcall(entry.obj.write, entry.obj, nil)
+    vim.defer_fn(function()
+      if not entry.dead then pcall(entry.obj.kill, entry.obj, "sigkill") end
+    end, CLOSE_GRACE_MS)
+  else
     pcall(entry.obj.kill, entry.obj, "sigkill")
   end
-  vim.wait(500, function() return entry.dead end, 10)
 end
 
 -- Lazily register autocmds (called on first pool use).
@@ -67,22 +80,18 @@ local function ensure_autocmds()
   if _ag then return end
   _ag = vim.api.nvim_create_augroup("DadbodGripSqlServerPool", { clear = true })
 
-  -- TabClosed: prune closed tabs from each entry; dispose entries with no tabs left.
+  -- TabClosed: prune closed tabs from each entry; close entries with no tabs left.
   vim.api.nvim_create_autocmd("TabClosed", {
     group = _ag,
     callback = function()
-      for key, entry in pairs(_pool) do
+      for _, entry in pairs(_pool) do
         for handle in pairs(entry.tabs) do
           if not vim.api.nvim_tabpage_is_valid(handle) then
             entry.tabs[handle] = nil
           end
         end
-        if vim.tbl_isempty(entry.tabs) then
-          kill_entry(entry)
-          if entry.idle_timer then
-            pcall(function() entry.idle_timer:stop(); entry.idle_timer:close() end)
-          end
-          _pool[key] = nil
+        if vim.tbl_isempty(entry.tabs) and not entry.busy then
+          close_entry(entry, true)
         end
       end
     end,
@@ -91,29 +100,54 @@ local function ensure_autocmds()
   -- VimLeavePre: dispose all entries.
   vim.api.nvim_create_autocmd("VimLeavePre", {
     group = _ag,
-    callback = M.dispose_all,
+    callback = function() M.dispose_all() end,
   })
 end
 
 -- Arm/rearm the idle timer for an entry (called after each successful batch).
-local function arm_idle_timer(entry, timeout_ms)
-  if entry.idle_timer then
-    entry.idle_timer:stop()
-  else
-    entry.idle_timer = vim.uv.new_timer()
-  end
+-- The batch count guards against a firing that was already queued when
+-- another batch started.
+local function arm_idle_timer(entry)
+  entry.idle_timer = entry.idle_timer or vim.uv.new_timer()
+  entry.idle_timer:stop()
+  local armed_at = entry.batches
+  entry.idle_timer:start(config.values.sqlserver_pool_idle_timeout, 0, vim.schedule_wrap(function()
+    if entry.closed or entry.busy or entry.batches ~= armed_at then return end
+    close_entry(entry, true)
+  end))
+end
 
-  local function fire()
-    if entry.busy then
-      arm_idle_timer(entry, timeout_ms)
+-- Feed one stdout chunk through the batch framing. Runs in a libuv callback,
+-- so it sticks to plain string work: complete lines are collected into
+-- entry.out, error headers raise entry.max_level, and the sentinel line ends
+-- the batch. Output while no batch is waiting means the framing is broken.
+local function on_stdout(entry, data)
+  if not data or data == "" then return end
+  if not entry.token or entry.done then
+    entry.desync = true
+    return
+  end
+  local pos = 1
+  while true do
+    local nl = data:find("\n", pos, true)
+    if not nl then break end
+    local line = data:sub(pos, nl)
+    if #entry.pending > 0 then
+      entry.pending[#entry.pending + 1] = line
+      line = table.concat(entry.pending)
+      entry.pending = {}
+    end
+    pos = nl + 1
+    if line == entry.token .. "\n" or line == entry.token .. "\r\n" then
+      entry.done = true
+      if pos <= #data then entry.desync = true end
       return
     end
-    kill_entry(entry)
-    entry.idle_timer = nil
-    _pool[entry.key] = nil
+    local level = line:match(ERROR_HEADER)
+    if level then entry.max_level = math.max(entry.max_level, tonumber(level)) end
+    entry.out[#entry.out + 1] = line
   end
-
-  entry.idle_timer:start(timeout_ms, 0, vim.schedule_wrap(fire))
+  if pos <= #data then entry.pending[#entry.pending + 1] = data:sub(pos) end
 end
 
 -- One-shot argv uses -b so a server error sets the exit code, but -b also ends
@@ -121,221 +155,159 @@ end
 -- pool drops it and reads each batch's "Msg N, Level L, ..." headers instead
 -- (both mssql-tools and go-sqlcmd print them on stdout without -b).
 local function pooled_args(args)
-  local out = {}
-  for _, arg in ipairs(args) do
-    if arg ~= "-b" then out[#out + 1] = arg end
-  end
-  return out
+  return vim.tbl_filter(function(arg) return arg ~= "-b" end, args)
 end
 
 -- Spawn a new sqlcmd process with streaming stdin.
-local function spawn_process(parsed, sqlcmd_args_fn, sqlcmd_env_fn)
-  local args = pooled_args(sqlcmd_args_fn(parsed))
-  local env = sqlcmd_env_fn(parsed)
-
+local function spawn_process(key, parsed, sqlcmd_args_fn, sqlcmd_env_fn)
   local entry = {
-    buf = "",
-    stderr_buf = "",
-    dead = false,
-    batch_counter = 0,
-    identity = {
-      host = parsed.host,
-      port = parsed.port,
-      dbname = parsed.dbname,
-      user_or_auth = parsed.user or parsed.authentication or "integrated",
-    },
+    key = key,
+    tabs = {},
+    batches = 0,
+    out = {},       -- complete stdout lines of the current batch
+    pending = {},   -- pieces of a stdout line still missing its newline
+    err = {},       -- stderr chunks of the current batch
+    max_level = 0,
   }
 
-  local sys_opts = {
+  local ok, obj = pcall(_spawner or vim.system, pooled_args(sqlcmd_args_fn(parsed)), {
     text = true,
     stdin = true,
-    stdout = function(err, data)
-      entry.buf = entry.buf .. (data or "")
+    stdout = function(_, data) on_stdout(entry, data) end,
+    stderr = function(_, data)
+      if data then entry.err[#entry.err + 1] = data end
     end,
-    stderr = function(err, data)
-      entry.stderr_buf = entry.stderr_buf .. (data or "")
-    end,
-    env = env,
-  }
-
-  local ok, err = pcall(function()
-    local spawner = _spawner or vim.system
-    entry.obj = spawner(args, sys_opts, function(r)
-      entry.dead = true
-      entry.exit_code = r.code
-    end)
+    env = sqlcmd_env_fn(parsed),
+  }, function(r)
+    entry.dead = true
+    entry.exit_code = r.code
   end)
 
-  if not ok then
-    return nil, tostring(err)
-  end
-
+  if not ok then return nil, tostring(obj) end
+  entry.obj = obj
   return entry
 end
 
--- Kill an entry after a failed batch and remove it from the pool.
-local function discard_entry(key, entry)
-  kill_entry(entry)
-  if entry.idle_timer then
-    pcall(function() entry.idle_timer:stop(); entry.idle_timer:close() end)
-  end
-  if _pool[key] == entry then _pool[key] = nil end
-  entry.busy = false
-end
-
--- Server error header as both clients print it. Anchored to a whole line with
--- no tabs, so a multi-column result row (-s "\t") cannot match.
-local ERROR_HEADER = "^Msg %d+, Level (%d+), State %d+, Server [^\t,]+, [^\t]*Line %d+\r?$"
-
--- Scan complete stdout lines not yet seen and record the highest error level.
-local function scan_levels(entry, stop)
-  stop = stop or #entry.buf
-  while entry.scan_pos <= stop do
-    local nl = entry.buf:find("\n", entry.scan_pos, true)
-    if not nl or nl > stop + 1 then return end
-    local level = entry.buf:sub(entry.scan_pos, nl - 1):match(ERROR_HEADER)
-    if level then entry.max_level = math.max(entry.max_level, tonumber(level)) end
-    entry.scan_pos = nl + 1
-  end
-end
-
--- Send one script followed by a PRINT sentinel batch and wait for the sentinel.
--- Returns (stdout, stderr, max_level) for the script, or nil plus "fatal",
--- "dead" or "timeout". Level >= 20 means the server is dropping the session;
--- go-sqlcmd then hangs instead of exiting, so stop waiting at once.
+-- Send one script plus a closing batch that rolls back any transaction it left
+-- open (bounding lock exposure) and prints a random sentinel, then wait for
+-- the sentinel. Returns "done", "fatal", "dead" or "timeout". Level >= 20
+-- means the server is dropping the session; go-sqlcmd then hangs instead of
+-- exiting, so stop waiting at once.
 local function send_batch(entry, script, timeout_ms)
-  entry.batch_counter = entry.batch_counter + 1
-  local token = string.format("\x01GRIPEOB:%d:%x\x01", entry.batch_counter, math.random(0, 0xffffffff))
-  entry.scan_pos, entry.max_level = 1, 0
-  entry.obj:write(script .. "\nGO\nPRINT '" .. token .. "'\nGO\n")
+  entry.batches = entry.batches + 1
+  entry.out, entry.pending, entry.err, entry.max_level, entry.done = {}, {}, {}, 0, false
+  entry.token = "GRIPEOB:" .. vim.uv.random(8):gsub(".", function(c)
+    return string.format("%02x", c:byte())
+  end)
+  entry.obj:write(script .. "\nGO\nIF @@TRANCOUNT > 0 ROLLBACK TRANSACTION\nPRINT '"
+    .. entry.token .. "'\nGO\n")
 
-  local idx
-  vim.wait(timeout_ms, function()
-    idx = entry.buf:find(token, 1, true)
-    if idx then return true end
-    scan_levels(entry)
-    return entry.dead or entry.max_level >= 20
+  vim.wait(math.max(timeout_ms, 0), function()
+    return entry.done or entry.dead or entry.max_level >= 20
   end, 5)
+  entry.token = nil
 
-  if not idx then
-    if entry.max_level >= 20 then
-      -- mssql-tools exits on its own; give it a moment to flush the rest.
-      vim.wait(500, function() return entry.dead end, 10)
-      return nil, "fatal"
-    end
-    return nil, entry.dead and "dead" or "timeout"
+  if entry.done then return "done" end
+  if entry.max_level >= 20 then
+    -- mssql-tools exits on its own; give it a moment to flush the rest.
+    vim.wait(500, function() return entry.dead end, 10)
+    return "fatal"
   end
-
-  scan_levels(entry, idx - 1)
-  local stdout = entry.buf:sub(1, idx - 1)
-  entry.buf = entry.buf:sub(idx + #token):gsub("^\r?\n", "")
-  -- Without -r, stderr only carries client-side failures.
-  local stderr = entry.stderr_buf
-  entry.stderr_buf = ""
-  return stdout, stderr, entry.max_level
+  return entry.dead and "dead" or "timeout"
 end
 
--- Run one batch (script) against the pooled connection identified by key.
+-- Run one batch (script) against the pooled connection for `parsed`.
 -- Returns (stdout, stderr, code) matching adapters.run_cmd's contract.
-function M.run(key, parsed, script, timeout_ms, sqlcmd_args_fn, sqlcmd_env_fn)
-  local pool_enabled = config.values.sqlserver_pool
-  if pool_enabled == nil then pool_enabled = true end
-
-  if not pool_enabled then
-    -- Pooling disabled; fall back to one-shot via adapters.run_cmd.
+function M.run(parsed, script, timeout_ms, sqlcmd_args_fn, sqlcmd_env_fn)
+  if not config.values.sqlserver_pool then
     return adapters.run_cmd(sqlcmd_args_fn(parsed), timeout_ms,
       { stdin = script, env = sqlcmd_env_fn(parsed) })
   end
 
   ensure_autocmds()
+  local key = M.key_for(parsed)
+  local deadline = vim.uv.now() + timeout_ms
 
-  -- Get or create the pool entry.
-  local entry = _pool[key]
+  -- Wait for exclusive access to this connection's process.
+  local entry
+  local free = vim.wait(timeout_ms, function()
+    entry = _pool[key]
+    return not (entry and entry.busy)
+  end, 5)
+  if not free then
+    return "", "Connection busy, timed out waiting", 1
+  end
+
+  -- A process that died while idle (server or network dropped it) or printed
+  -- out of turn cannot be trusted with the next batch; start a fresh one.
+  local tabs
+  if entry and (entry.dead or entry.desync) then
+    tabs = entry.tabs
+    close_entry(entry)
+    entry = nil
+  end
   if not entry then
     local err
-    entry, err = spawn_process(parsed, sqlcmd_args_fn, sqlcmd_env_fn)
+    entry, err = spawn_process(key, parsed, sqlcmd_args_fn, sqlcmd_env_fn)
     if not entry then
-      return "", "Failed to spawn sqlcmd: " .. (err or "unknown error"), 1
+      return "", "Failed to start sqlcmd: " .. (err or "unknown error"), 1
     end
-    entry.key = key
-    entry.tabs = {}
+    entry.tabs = tabs or entry.tabs
     _pool[key] = entry
   end
-
-  -- Record the current tabpage as using this connection (idempotent).
-  local current_tab = vim.api.nvim_get_current_tabpage()
-  entry.tabs[current_tab] = true
-
-  -- Busy-wait for exclusive access to this entry's stdin.
-  local deadline = vim.loop.now() + timeout_ms
-  while entry.busy do
-    if vim.loop.now() > deadline then
-      return "", "Connection busy, timed out waiting", 1
-    end
-    vim.wait(10, function() return not entry.busy end, 5)
-    -- The holder may have replaced or dropped the entry while we waited.
-    entry = _pool[key] or entry
-  end
+  entry.tabs[vim.api.nvim_get_current_tabpage()] = true
   entry.busy = true
 
-  -- Check if the process is dead (error on last batch or crashed); respawn.
-  if entry.dead then
-    local dead_entry = entry
-    local err
-    entry, err = spawn_process(parsed, sqlcmd_args_fn, sqlcmd_env_fn)
-    if not entry then
-      -- Drop the dead entry so waiters stop queueing behind it.
-      if _pool[key] == dead_entry then _pool[key] = nil end
-      dead_entry.busy = false
-      return "", "Failed to respawn sqlcmd: " .. (err or "unknown error"), 1
-    end
-    entry.key = key
-    entry.tabs = { [current_tab] = true }
-    entry.busy = true
-    _pool[key] = entry
-    dead_entry.busy = false
-  end
+  local status = send_batch(entry, script, deadline - vim.uv.now())
+  local stdout = table.concat(entry.out) .. table.concat(entry.pending)
+  local stderr = table.concat(entry.err)
 
-  local stdout, stderr, max_level = send_batch(entry, script, timeout_ms)
-  if not stdout then
-    local reason = stderr
-    discard_entry(key, entry)
-    if reason ~= "timeout" then
-      -- Fatal server error or crash: hand back what the process printed so the
-      -- "Msg NNNN" text survives.
-      local code = entry.exit_code
-      if not code or code == 0 or reason == "fatal" then code = 1 end
-      return entry.buf, entry.stderr_buf, code
-    end
+  if status == "timeout" then
+    close_entry(entry)
     return "", "Query timed out or connection desynchronized (recreating connection)", 1
   end
-
-  -- Run safety-net rollback to bound transaction-leak window.
-  if not send_batch(entry, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION", timeout_ms) then
-    discard_entry(key, entry)
-    return "", "Connection desynchronized during rollback (recreating connection)", 1
+  if status ~= "done" then
+    -- Fatal server error or crash: hand back what the process printed so the
+    -- "Msg NNNN" text survives.
+    close_entry(entry)
+    local code = entry.exit_code
+    if not code or code == 0 or status == "fatal" then code = 1 end
+    return stdout, stderr, code
   end
 
-  -- Mark entry idle again and arm the idle timer.
-  entry.busy = false
-  arm_idle_timer(entry, config.values.sqlserver_pool_idle_timeout)
+  if entry.desync then
+    -- This batch's output is complete, but the process printed past the
+    -- sentinel; do not hand it another batch.
+    close_entry(entry)
+  else
+    entry.busy = false
+    arm_idle_timer(entry)
+  end
 
   -- Severity 11+ is an error; 10 and below are informational messages.
-  if max_level >= 11 or vim.trim(stderr) ~= "" then
+  -- Without -r, stderr only carries client-side failures.
+  if entry.max_level >= 11 or vim.trim(stderr) ~= "" then
     return stdout, stderr, 1
   end
   return stdout, stderr, 0
 end
 
--- Kill and discard every pool entry. Called from VimLeavePre and tests.
+-- Close every pool entry. Called from VimLeavePre and tests: all processes get
+-- stdin EOF at once, one shared wait lets them log out, and any left are killed.
 function M.dispose_all()
-  for key, entry in pairs(_pool) do
-    if entry.idle_timer then
-      pcall(function() entry.idle_timer:stop(); entry.idle_timer:close() end)
-    end
-    kill_entry(entry)
+  local entries = vim.tbl_values(_pool)
+  for _, entry in ipairs(entries) do
+    close_entry(entry, true)
   end
-  _pool = {}
+  vim.wait(1000, function()
+    for _, entry in ipairs(entries) do
+      if not entry.dead then return false end
+    end
+    return true
+  end, 10)
+  for _, entry in ipairs(entries) do
+    if not entry.dead then pcall(entry.obj.kill, entry.obj, "sigkill") end
+  end
 end
 
 return M

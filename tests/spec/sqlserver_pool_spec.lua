@@ -13,11 +13,11 @@ local function eq(a, b, msg)
   assert(vim.deep_equal(a, b), (msg or "") .. ": expected " .. vim.inspect(b) .. ", got " .. vim.inspect(a))
 end
 
--- Test: key_for collapses host/port/dbname/user/auth/encrypt/trust/cert.
+-- Test: key_for collapses host/port/dbname/user/auth/encrypt/trust/cert/password.
 test("key_for: identical connections produce same key", function()
-  local p1 = { host = "srv", port = "1433", dbname = "db", user = "sa", encrypt = "mandatory", pass = "secret1" }
-  local p2 = { host = "srv", port = "1433", dbname = "db", user = "sa", encrypt = "mandatory", pass = "secret2" }
-  eq(pool.key_for(p1), pool.key_for(p2), "different passwords still produce same key")
+  local p1 = { host = "srv", port = "1433", dbname = "db", user = "sa", encrypt = "mandatory", pass = "secret" }
+  local p2 = { host = "srv", port = "1433", dbname = "db", user = "sa", encrypt = "mandatory", pass = "secret" }
+  eq(pool.key_for(p1), pool.key_for(p2), "same connection")
 end)
 
 -- Test: key_for differentiates connections by identity fields.
@@ -27,26 +27,13 @@ test("key_for: different hosts produce different keys", function()
   assert(pool.key_for(p1) ~= pool.key_for(p2), "different hosts should differ")
 end)
 
--- Test: _extract_until_sentinel handles present/absent/partial tokens.
-test("_extract_until_sentinel: finds sentinel", function()
-  local buf = "result1\nresult2\n\x01MARKER\x01extra"
-  local before, found = pool._extract_until_sentinel(buf, "\x01MARKER\x01")
-  eq(before, "result1\nresult2\n", "extracts content before sentinel")
-  assert(found, "should mark as found")
-end)
-
-test("_extract_until_sentinel: sentinel not found", function()
-  local buf = "result1\nresult2\n"
-  local before, found = pool._extract_until_sentinel(buf, "\x01MISSING\x01")
-  eq(before, buf, "returns whole buffer when sentinel absent")
-  assert(not found, "should mark as not found")
-end)
-
--- Test: dispose_all clears pool.
-test("M.dispose_all: clears pool", function()
-  pool._entries()[pool.key_for({ host = "test" })] = nil
-  pool.dispose_all()
-  assert(vim.tbl_count(pool._entries()) == 0, "pool should be empty after dispose_all")
+-- Test: a wrong password must not reuse a session another password opened,
+-- and the key must not carry the secret itself.
+test("key_for: different passwords produce different keys without the secret", function()
+  local p1 = { host = "srv", user = "sa", pass = "secret1" }
+  local p2 = { host = "srv", user = "sa", pass = "secret2" }
+  assert(pool.key_for(p1) ~= pool.key_for(p2), "different passwords should differ")
+  assert(not pool.key_for(p1):find("secret1", 1, true), "key contains the password")
 end)
 
 local cfg = require("dadbod-grip.config").values
@@ -55,57 +42,124 @@ local key = pool.key_for(parsed)
 local function args_fn() return { "sqlcmd" } end
 local function env_fn() return {} end
 
--- Fake sqlcmd without -b: answers each sentinel batch with the PRINT token on
--- stdout, after `respond(sql)` output for the script before it.
-local function marker_spawner(respond, seen_args)
-  return function(args, opts)
-    if seen_args then vim.list_extend(seen_args, args) end
-    return {
+-- Fake sqlcmd without -b. Each batch write gets `respond(script, proc)` output
+-- followed by the sentinel line, delivered in `chunk`-byte pieces when set.
+-- Closing stdin (write(nil)) or kill() ends the fake process.
+local function fake_sqlcmd(respond, opts)
+  opts = opts or {}
+  local procs = {}
+  local spawner = function(args, sys_opts, on_exit)
+    local proc = { args = args, writes = {}, killed = false }
+    local function exit(code)
+      if proc.exited then return end
+      proc.exited = true
+      on_exit({ code = code })
+    end
+    proc.exit = exit
+    proc.stdout = function(data) sys_opts.stdout(nil, data) end
+    proc.obj = {
       write = function(_, payload)
-        local script = payload:match("^(.-)\nGO\nPRINT '")
+        if payload == nil then return exit(0) end
+        proc.writes[#proc.writes + 1] = payload
+        local script = payload:match("^(.-)\nGO\nIF @@TRANCOUNT")
         local token = payload:match("PRINT '([^']*)'")
-        opts.stdout(nil, (respond(script) or "") .. token .. "\n")
+        local out = (respond and respond(script, proc) or "") .. token .. "\n" .. (opts.after or "")
+        local size = opts.chunk or #out
+        for i = 1, #out, size do sys_opts.stdout(nil, out:sub(i, i + size - 1)) end
       end,
-      kill = function() end,
+      kill = function() proc.killed = true; exit(-1) end,
     }
+    procs[#procs + 1] = proc
+    return proc.obj
   end
+  return spawner, procs
 end
 
 local function with_pool(fn)
-  local saved_pool = cfg.sqlserver_pool
+  local saved_pool, saved_idle = cfg.sqlserver_pool, cfg.sqlserver_pool_idle_timeout
   cfg.sqlserver_pool = true
   local ok, err = pcall(fn)
-  pool._set_spawner(nil)
   pool.dispose_all()
-  cfg.sqlserver_pool = saved_pool
+  pool._set_spawner(nil)
+  cfg.sqlserver_pool, cfg.sqlserver_pool_idle_timeout = saved_pool, saved_idle
   if not ok then error(err, 0) end
+end
+
+local function run(sql, timeout_ms)
+  return pool.run(parsed, sql, timeout_ms or 1000, args_fn, env_fn)
 end
 
 local MSG_208 = "Msg 208, Level 16, State 1, Server s, Line 1\nInvalid object name 'x'.\n"
 
+test("M.dispose_all: clears pool", function()
+  with_pool(function()
+    pool._set_spawner(fake_sqlcmd())
+    run("SELECT 1")
+    assert(pool._entries()[key], "entry should exist before dispose_all")
+  end)
+  assert(vim.tbl_count(pool._entries()) == 0, "pool should be empty after dispose_all")
+end)
+
 test("run: pooled argv drops -b", function()
   with_pool(function()
-    local seen = {}
-    pool._set_spawner(marker_spawner(function() end, seen))
-    pool.run(key, parsed, "SELECT 1", 1000, function() return { "sqlcmd", "-b", "-W" } end, env_fn)
-    eq(seen, { "sqlcmd", "-W" }, "argv")
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    pool.run(parsed, "SELECT 1", 1000, function() return { "sqlcmd", "-b", "-W" } end, env_fn)
+    eq(procs[1].args, { "sqlcmd", "-W" }, "argv")
+  end)
+end)
+
+-- The rollback safety net shares the sentinel batch: one write, one round trip.
+test("run: one write per batch, rollback before the sentinel", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd(function() return "v\n-\n1\n" end)
+    pool._set_spawner(spawner)
+    local stdout, _, code = run("SELECT 1")
+    eq(code, 0, "exit code")
+    eq(stdout, "v\n-\n1\n", "stdout")
+    eq(#procs[1].writes, 1, "writes")
+    assert(procs[1].writes[1]:match("^SELECT 1\nGO\nIF @@TRANCOUNT > 0 ROLLBACK TRANSACTION\nPRINT '"),
+      "payload: " .. vim.inspect(procs[1].writes[1]))
+  end)
+end)
+
+test("run: sentinel is random per batch", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    run("SELECT 1")
+    run("SELECT 1")
+    local t1 = procs[1].writes[1]:match("PRINT '([^']*)'")
+    local t2 = procs[1].writes[2]:match("PRINT '([^']*)'")
+    assert(t1:match("^GRIPEOB:%x+$") and #t1 == 24, "token shape: " .. t1)
+    assert(t1 ~= t2, "tokens repeat")
+  end)
+end)
+
+test("run: lines and the sentinel split across chunks", function()
+  with_pool(function()
+    pool._set_spawner(fake_sqlcmd(function() return "a\tb\n-\t-\n1\t2\n" .. MSG_208 end, { chunk = 3 }))
+    local stdout, _, code = run("SELECT 1")
+    eq(stdout, "a\tb\n-\t-\n1\t2\n" .. MSG_208, "stdout")
+    eq(code, 1, "error header seen across chunks")
+    assert(pool._entries()[key], "entry kept")
   end)
 end)
 
 test("run: server error header fails the batch but keeps the session", function()
   with_pool(function()
-    pool._set_spawner(marker_spawner(function(sql)
+    pool._set_spawner(fake_sqlcmd(function(sql)
       if sql == "SELECT * FROM x" then return MSG_208 end
       if sql == "SELECT 1" then return "v\n-\n1\n" end
     end))
-    local stdout, stderr, code = pool.run(key, parsed, "SELECT * FROM x", 1000, args_fn, env_fn)
+    local stdout, stderr, code = run("SELECT * FROM x")
     eq(code, 1, "error exit code")
     eq(stdout, MSG_208, "error text on stdout")
     eq(stderr, "", "stderr")
     local entry = pool._entries()[key]
     assert(entry and not entry.dead, "entry should survive a server error")
 
-    stdout, _, code = pool.run(key, parsed, "SELECT 1", 1000, args_fn, env_fn)
+    stdout, _, code = run("SELECT 1")
     eq(code, 0, "next batch succeeds")
     eq(stdout, "v\n-\n1\n", "next batch stdout")
     assert(pool._entries()[key] == entry, "same entry reused")
@@ -114,11 +168,11 @@ end)
 
 test("run: lookalike result rows and level 10 messages are not errors", function()
   with_pool(function()
-    pool._set_spawner(marker_spawner(function()
+    pool._set_spawner(fake_sqlcmd(function()
       return "a\tb\n-\t-\nMsg 1, Level 16, State 1, Server s, Line 1\tx\nMsg 1, Level 16, fake\n"
         .. "Msg 50000, Level 10, State 1, Server s, Line 1\njust info\n"
     end))
-    local _, _, code = pool.run(key, parsed, "SELECT 1", 1000, args_fn, env_fn)
+    local _, _, code = run("SELECT 1")
     eq(code, 0, "exit code")
   end)
 end)
@@ -129,14 +183,14 @@ test("run: fatal error stops waiting and drops the entry", function()
   with_pool(function()
     pool._set_spawner(function(_, opts, on_exit)
       return {
-        write = function()
-          opts.stdout(nil, "Msg 50000, Level 20, State 1, Server s, Line 1\nfatal\n")
+        write = function(_, payload)
+          if payload then opts.stdout(nil, "Msg 50000, Level 20, State 1, Server s, Line 1\nfatal\n") end
         end,
         kill = function() on_exit({ code = -1 }) end,
       }
     end)
     local started = vim.uv.now()
-    local stdout, _, code = pool.run(key, parsed, "RAISERROR('fatal', 20, 1) WITH LOG", 10000, args_fn, env_fn)
+    local stdout, _, code = run("RAISERROR('fatal', 20, 1) WITH LOG", 10000)
     assert(vim.uv.now() - started < 3000, "waited " .. (vim.uv.now() - started) .. "ms")
     eq(code, 1, "exit code")
     assert(stdout:match("^Msg 50000, Level 20"), "stdout: " .. vim.inspect(stdout))
@@ -148,44 +202,108 @@ end)
 -- error), the batch's "Msg NNNN" output must reach the caller instead of a
 -- generic desync error.
 test("run: process exiting on server error returns its output", function()
-  local saved_pool = cfg.sqlserver_pool
-  cfg.sqlserver_pool = true
-  pool._set_spawner(function(_, opts, on_exit)
-    return {
-      write = function()
-        opts.stdout(nil, "Msg 208, Level 16, State 1, Line 1\nInvalid object name 'x'.\n")
-        on_exit({ code = 1 })
-      end,
-      kill = function() end,
-    }
+  with_pool(function()
+    pool._set_spawner(function(_, opts, on_exit)
+      return {
+        write = function()
+          opts.stdout(nil, MSG_208)
+          on_exit({ code = 1 })
+        end,
+        kill = function() end,
+      }
+    end)
+    local stdout, _, code = run("SELECT * FROM x")
+    eq(code, 1, "exit code")
+    eq(stdout, MSG_208, "stdout")
+    assert(pool._entries()[key] == nil, "dead entry should be dropped")
   end)
-  local stdout, _, code = pool.run(key, parsed, "SELECT * FROM x", 1000, args_fn, env_fn)
-  pool._set_spawner(nil)
-  cfg.sqlserver_pool = saved_pool
-  eq(code, 1, "exit code")
-  assert(stdout:match("^Msg 208"), "stdout should carry server message, got " .. vim.inspect(stdout))
-  assert(pool._entries()[key] == nil, "dead entry should be dropped")
 end)
 
--- Test: a failed respawn of a dead entry returns an error (no nil-index crash)
--- and removes the dead entry so later callers do not wait on it.
+test("run: output past the sentinel returns the batch, then discards the entry", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd(function() return "v\n-\n1\n" end, { after = "stray\n" })
+    pool._set_spawner(spawner)
+    local stdout, _, code = run("SELECT 1")
+    eq(code, 0, "exit code")
+    eq(stdout, "v\n-\n1\n", "stdout")
+    assert(pool._entries()[key] == nil, "entry should be discarded")
+    assert(procs[1].killed, "process should be killed")
+  end)
+end)
+
+test("run: output while idle makes the next batch use a fresh process", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    run("SELECT 1")
+    procs[1].stdout("unexpected\n")
+    run("SELECT 1")
+    eq(#procs, 2, "processes")
+    assert(procs[1].killed, "first process should be killed")
+  end)
+end)
+
+-- Test: a process that died while idle is replaced, and the replacement keeps
+-- the tabs that were using the connection.
+test("run: dead idle entry is replaced and keeps its tabs", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    run("SELECT 1")
+    pool._entries()[key].tabs[12345] = true
+    procs[1].exit(1)
+    local _, _, code = run("SELECT 1")
+    eq(code, 0, "exit code")
+    eq(#procs, 2, "processes")
+    assert(pool._entries()[key].tabs[12345], "tabs carried over")
+  end)
+end)
+
+-- Test: the idle timer of a process that died must not remove its replacement
+-- from the pool (which orphaned the new process).
+test("run: dead entry's idle timer leaves the replacement alone", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    cfg.sqlserver_pool_idle_timeout = 100
+    run("SELECT 1")
+    procs[1].exit(1)
+    cfg.sqlserver_pool_idle_timeout = 100000
+    run("SELECT 1")
+    vim.wait(300)
+    assert(pool._entries()[key], "replacement should stay in the pool")
+    assert(not procs[2].exited, "replacement should stay alive")
+  end)
+end)
+
+test("run: idle timeout closes the process", function()
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    cfg.sqlserver_pool_idle_timeout = 50
+    run("SELECT 1")
+    vim.wait(1000, function() return procs[1].exited end, 10)
+    assert(procs[1].exited and not procs[1].killed, "closed through stdin EOF")
+    assert(pool._entries()[key] == nil, "entry dropped")
+  end)
+end)
+
+-- Test: a failed respawn of a dead entry returns an error (no crash) and
+-- removes the dead entry so later callers do not wait on it.
 test("run: respawn failure drops dead entry", function()
-  local saved_pool = cfg.sqlserver_pool
-  cfg.sqlserver_pool = true
-  local dead = { key = key, dead = true, tabs = {}, buf = "", stderr_buf = "", batch_counter = 0 }
-  pool._entries()[key] = dead
-  pool._set_spawner(function() error("spawn refused") end)
-  local ok, stdout, stderr, code = pcall(pool.run, key, parsed, "SELECT 1", 1000, args_fn, env_fn)
-  pool._set_spawner(nil)
-  cfg.sqlserver_pool = saved_pool
-  assert(ok, "run should not raise: " .. tostring(stdout))
-  eq(code, 1, "exit code")
-  assert(stderr:match("^Failed to respawn sqlcmd"), "stderr: " .. vim.inspect(stderr))
-  assert(pool._entries()[key] == nil, "dead entry should be dropped")
-  assert(not dead.busy, "dead entry should not stay busy")
+  with_pool(function()
+    local spawner, procs = fake_sqlcmd()
+    pool._set_spawner(spawner)
+    run("SELECT 1")
+    procs[1].exit(1)
+    pool._set_spawner(function() error("spawn refused") end)
+    local ok, _, stderr, code = pcall(run, "SELECT 1")
+    assert(ok, "run should not raise: " .. tostring(stderr))
+    eq(code, 1, "exit code")
+    assert(stderr:match("^Failed to start sqlcmd"), "stderr: " .. vim.inspect(stderr))
+    assert(pool._entries()[key] == nil, "dead entry should be dropped")
+  end)
 end)
-
-pool.dispose_all()
 
 print(string.format("\nSQL Server pool: %d passed, %d failed\n", pass, fail))
 if fail > 0 then os.exit(1) end

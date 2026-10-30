@@ -58,6 +58,7 @@ grip-navigation	dadbod-grip.txt	/*grip-navigation*
 grip-picker	dadbod-grip.txt	/*grip-picker*
 grip-pinned-max	dadbod-grip.txt	/*grip-pinned-max*
 grip-profiling	dadbod-grip.txt	/*grip-profiling*
+grip-project-state	dadbod-grip.txt	/*grip-project-state*
 grip-query-pad	dadbod-grip.txt	/*grip-query-pad*
 grip-readonly	dadbod-grip.txt	/*grip-readonly*
 grip-requirements	dadbod-grip.txt	/*grip-requirements*
@@ -68,6 +69,7 @@ grip-schema-folders	dadbod-grip.txt	/*grip-schema-folders*
 grip-secrets	dadbod-grip.txt	/*grip-secrets*
 grip-sort-filter	dadbod-grip.txt	/*grip-sort-filter*
 grip-sort-filter-page	dadbod-grip.txt	/*grip-sort-filter-page*
+grip-sqlserver-pool	dadbod-grip.txt	/*grip-sqlserver-pool*
 grip-sticky-header	dadbod-grip.txt	/*grip-sticky-header*
 grip-tab-views	dadbod-grip.txt	/*grip-tab-views*
 grip-visual-mode	dadbod-grip.txt	/*grip-visual-mode*
