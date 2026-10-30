@@ -64,4 +64,7 @@ if not vim.g.grip_test_state_home then
   vim.env.XDG_STATE_HOME = vim.g.grip_test_state_home
 end
 
--- Do not call setup() for pure module tests
+-- Do not call setup() for pure module tests. However, disable SQL Server pooling
+-- in all tests to avoid trying to spawn real processes (or streaming mocks).
+-- Live tests re-enable it explicitly when needed.
+require("dadbod-grip.config").values.sqlserver_pool = false

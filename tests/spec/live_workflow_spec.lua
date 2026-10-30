@@ -170,7 +170,7 @@ test("all-row export is complete and atomically written", function()
 end)
 
 if URL:match("^sqlserver://") or URL:match("^mssql://") then
-  test("SQL Server temporary tables share one submission but not the next", function()
+  test("SQL Server temporary tables share one submission", function()
     local name = "##grip_live_temp_scope"
     local result, err = db.query(table.concat({
       "CREATE TABLE " .. name .. " (id INT NOT NULL);",
@@ -181,10 +181,28 @@ if URL:match("^sqlserver://") or URL:match("^mssql://") then
     }, "\n"), URL)
     assert(result, err)
     eq(tonumber(result.rows[1][1]), 7, "GO batches share one sqlcmd session")
+  end)
 
+  test("SQL Server temporary tables survive pooled connection", function()
+    local name = "##grip_live_temp_scope"
+    -- Within a pooled session, temp table created in one query survives to the next.
     local next_result, next_err = db.query("SELECT id FROM " .. name, URL)
-    assert(not next_result, "temporary table survived a new sqlcmd invocation")
-    assert(next_err and next_err ~= "", "missing-object error was not reported")
+    assert(next_result, "temporary table should survive within pooled connection: " .. (next_err or ""))
+    eq(tonumber(next_result.rows[1][1]), 7, "temp table contains expected row")
+  end)
+
+  test("SQL Server temporary tables die when pool entry is disposed", function()
+    local name = "##grip_live_temp_scope"
+    -- Force pool disposal by disabling pooling (falls back to one-shot per call).
+    require("dadbod-grip.config").values.sqlserver_pool = false
+    require("dadbod-grip.adapters.sqlserver_pool").dispose_all()
+
+    local result, err = db.query("SELECT id FROM " .. name, URL)
+    assert(not result, "temporary table should not survive after pool disposal: " .. (err or ""))
+    assert(err and err ~= "", "missing-object error was not reported")
+
+    -- Re-enable pooling for remaining tests.
+    require("dadbod-grip.config").values.sqlserver_pool = true
   end)
 end
 
