@@ -205,7 +205,7 @@ local TYPES = {}
 for _, w in ipairs(TYPE_NAMES) do TYPES[w] = true end
 
 -- Words the formatter knows that Vim's default SQL syntax (Oracle flavoured)
--- leaves unhighlighted; the query pad registers them as syntax keywords.
+-- leaves unhighlighted; after/syntax/sql.vim registers them as syntax keywords.
 -- Functions are highlight-only: the formatter never uppercases function names.
 -- Names that are common column names (year, month, day, age) or join keywords
 -- (left, right) are left out, since a keyword highlights with or without "(".

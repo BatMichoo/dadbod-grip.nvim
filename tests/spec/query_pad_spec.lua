@@ -357,23 +357,33 @@ do
   eq(#hints(), 1, "hint: back when the pad is blank again")
 end
 
--- ── syntax: formatter words are highlighted under regex SQL syntax ───────────
+-- ── syntax: after/syntax/sql.vim highlights formatter and dialect words ──────
 
 do
+  -- minimal_init only prepends the repo; plugin managers add after/ too.
+  local after = vim.fn.fnamemodify("after", ":p")
+  vim.opt.rtp:append(after)
   vim.cmd("syntax on")
   local b = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "declare @n NVarChar(50) = IsNull(x, 0)" })
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    "declare @n NVarChar(50) = IsNull(x, 0)",
+    "replace into t select replace(a, 'x', 'y') union all select 1",
+    "begin tran; while 1 = 1 break; commit",
+  })
   vim.api.nvim_buf_call(b, function() vim.bo.filetype = "sql" end)
-  qp._add_syntax_words(b)
-  local function grp(col)
+  local function grp(line, col)
     return vim.api.nvim_buf_call(b, function()
-      return vim.fn.synIDattr(vim.fn.synID(1, col, 1), "name")
+      return vim.fn.synIDattr(vim.fn.synID(line, col, 1), "name")
     end)
   end
-  eq(grp(1), "sqlStatement", "syntax: declare is a statement")
-  eq(grp(12), "sqlType", "syntax: NVarChar is a type, any case")
-  eq(grp(27), "sqlFunction", "syntax: IsNull is a function, any case")
+  eq(grp(1, 1), "gripSqlDML", "syntax: declare is a statement")
+  eq(grp(1, 12), "gripSqlType", "syntax: NVarChar is a type, any case")
+  eq(grp(1, 27), "gripSqlFunction", "syntax: IsNull is a function, any case")
+  eq(grp(2, 50), "gripSqlDML", "syntax: UNION ALL is not a function")
+  eq(grp(3, 7), "gripSqlDML", "syntax: T-SQL TRAN")
+  eq(grp(3, 13), "gripSqlOperator", "syntax: T-SQL WHILE")
   pcall(vim.api.nvim_buf_delete, b, { force = true })
+  vim.opt.rtp:remove(after)
 end
 
 -- ── quitting Neovim never asks to save the pad ──────────────────────────────
