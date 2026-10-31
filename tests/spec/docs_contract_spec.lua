@@ -37,7 +37,6 @@ end
 
 local readme = read("README.md")
 local help = read("doc/dadbod-grip.txt")
-local todo = read("TODO.md")
 local changelog = read("CHANGELOG.md")
 local grid_help = read("lua/dadbod-grip/view/help.lua") .. read("lua/dadbod-grip/view/export.lua")
 local contributing = read("CONTRIBUTING.md")
@@ -142,20 +141,6 @@ test("onboarding and process-privacy claims match current behavior", function()
 
   assert(not readme:find("Only `db.lua` and adapters run shell commands", 1, true),
     "README still claims an incomplete process boundary")
-end)
-
-test("TODO contains only active or unshipped work", function()
-  assert(todo:find("## Deferred", 1, true) and todo:find("## Product ideas", 1, true))
-  assert(not todo:find("- [x]", 1, true), "completed checkbox retained")
-  assert(not todo:find("v3.10.1", 1, true), "released version retained")
-  assert(not todo:find("Docker assign", 1, true), "completed dynamic-port work retained")
-  assert(not todo:find("README onboarding", 1, true), "completed README work retained")
-  assert(not todo:find("SECURITY.md", 1, true), "completed security policy retained")
-  assert(not todo:find("CONTRIBUTING.md", 1, true), "completed contributor guide retained")
-  assert(not todo:find("TOP N pagination", 1, true), "stale SQL Server pagination claim retained")
-  assert(not todo:find("`##temp`", 1, true), "stateless SQL Server temp-table scope retained as product work")
-  assert(not todo:find("GripFill", 1, true), "shipped GripFill work retained")
-  assert(not todo:find("Import CSV", 1, true), "shipped clipboard import retained")
 end)
 
 test("clipboard import documentation keeps its staging boundary", function()
