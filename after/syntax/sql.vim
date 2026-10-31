@@ -15,10 +15,10 @@ syntax case ignore
 
 " ── DML verbs ──────────────────────────────────────────────────────────────
 " SELECT  INSERT  UPDATE  DELETE  MERGE  UPSERT  REPLACE  TRUNCATE
-" WITH    UNION   INTERSECT  EXCEPT  ALL  DISTINCT
+" WITH    UNION   INTERSECT  EXCEPT  ALL  DISTINCT DECLARE
 syntax keyword gripSqlDML
   \ SELECT INSERT UPDATE DELETE MERGE UPSERT REPLACE TRUNCATE
-  \ WITH UNION INTERSECT EXCEPT ALL DISTINCT
+  \ WITH UNION INTERSECT EXCEPT ALL DISTINCT DECLARE
 
 " ── Clause keywords ────────────────────────────────────────────────────────
 " FROM  WHERE  JOIN family  GROUP BY  ORDER BY  HAVING  etc.
