@@ -48,11 +48,14 @@ end
 --- Both MySQL and MariaDB use --batch (tab-separated output; --csv is not a
 --- mysql CLI flag). --batch reports no affected-row count for DML, which is why
 --- execute() asks for ROW_COUNT() explicitly.
+--- --default-character-set=utf8mb4 because the client otherwise picks its
+--- charset from the locale, and a non-UTF-8 one (LANG=C, a bare container)
+--- turns multibyte text into "?" in both directions.
 --- Split out from mysql_query() so the blocking and non-blocking spawns run
 --- byte-identical command lines.
 ---
 local function mysql_args(parsed)
-  local args = { "mysql", "--batch" }
+  local args = { "mysql", "--batch", "--default-character-set=utf8mb4" }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host

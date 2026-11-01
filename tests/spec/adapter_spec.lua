@@ -1172,6 +1172,17 @@ test("mysql query: uses --batch flag", function()
   end)
 end)
 
+test("mysql query: pins the client charset to utf8mb4", function()
+  -- Left to the locale, a non-UTF-8 LANG makes the client use latin1 and
+  -- multibyte text comes back as "?".
+  with_executable(function()
+    local args = capture_system_args("id\t1\n", function()
+      mysql.query("SELECT 1", "mysql://root@localhost/test")
+    end)
+    has_arg(args, "--default-character-set=utf8mb4", "MySQL should pin utf8mb4")
+  end)
+end)
+
 -- ── MySQL column types come from COLUMN_TYPE ─────────────────────────────────
 -- Rebuilding the type from DATA_TYPE + CHARACTER_MAXIMUM_LENGTH/NUMERIC_PRECISION
 -- renders enum(7), float(12) and longtext(4294967295) -- shaped like DDL, wrong.

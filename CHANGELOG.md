@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MySQL/MariaDB: emoji and other multibyte text no longer come back as `?` when Neovim runs
+  without a UTF-8 locale. The `mysql` client is now always told to use `utf8mb4` instead of
+  picking a character set from the locale.
 - Query pad: the run key (`<F5>`) runs the whole buffer again (or the ```` ```sql ```` fence under the
   cursor in notebooks). Blank lines between or inside statements no longer cut the run down
   to the paragraph under the cursor. Select a statement and press the run key in visual mode to run just it.
