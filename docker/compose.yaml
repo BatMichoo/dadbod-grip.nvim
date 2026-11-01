@@ -1,0 +1,89 @@
+# Local live-test databases, matching the versions CI runs
+# (.github/workflows/test.yml and sqlserver.yml), plus a runner image that has
+# Neovim and every database CLI grip shells out to.
+#
+#   just db-up [service...]       start and seed (postgres mysql mariadb sqlserver)
+#   just test-docker mysql-8.4    run the live suite against one database
+#   just test-docker-all          run it against every database
+#   just db-down                  stop and discard everything
+#
+# Data lives in tmpfs, so every `db-up` after `db-down` starts from the seed
+# files again. The credentials are test-only and match CI. Ports are published
+# on 127.0.0.1 for running grip or a client from the host.
+
+name: grip-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: grip
+      POSTGRES_DB: grip_test
+    volumes:
+      - ../tests/seed_pg.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    tmpfs: /var/lib/postgresql/data
+    ports: ["127.0.0.1:15432:5432"]
+    # TCP only comes up once the init scripts have run.
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "grip_test"]
+      interval: 2s
+      retries: 60
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: grip
+      MYSQL_DATABASE: grip_test
+    volumes:
+      - ../tests/seed_mysql.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    tmpfs: /var/lib/mysql
+    ports: ["127.0.0.1:13306:3306"]
+    # The init server runs with --skip-networking, so a TCP ping means seeded.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pgrip", "--silent"]
+      interval: 2s
+      retries: 90
+
+  mariadb:
+    image: mariadb:11.8
+    environment:
+      MARIADB_ROOT_PASSWORD: grip
+      MARIADB_DATABASE: grip_test
+    volumes:
+      - ../tests/seed_mysql.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    tmpfs: /var/lib/mysql
+    ports: ["127.0.0.1:13307:3306"]
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "-uroot", "-pgrip", "--silent"]
+      interval: 2s
+      retries: 90
+
+  # The 2025 image creates MSSQL_DB and runs /mssql-server-setup-scripts.d on
+  # first start; sqlserver-setup.sql switches to grip_test and includes the seed.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Grip-ci-2025!"
+      MSSQL_DB: grip_test
+    volumes:
+      - ./sqlserver-setup.sql:/mssql-server-setup-scripts.d/grip.sql:ro
+      - ../tests/seed_mssql.sql:/seed/seed_mssql.sql:ro
+    ports: ["127.0.0.1:11433:1433"]
+    # Healthy once the seed's last table (long_values) holds its 3 rows.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          [ "$$(SQLCMDPASSWORD="$$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd -C -S 127.0.0.1 -U sa -h -1
+          -Q 'SET NOCOUNT ON; SELECT COUNT(*) FROM grip_test.dbo.long_values' 2>/dev/null | tr -d ' \r\n')" = 3 ]
+      interval: 3s
+      retries: 100
+
+  # Only started by `docker compose run` (test-live.sh), never by `up`.
+  runner:
+    build: runner
+    profiles: [runner]
+    volumes:
+      - ..:/work
+    working_dir: /work

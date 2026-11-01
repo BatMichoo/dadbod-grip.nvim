@@ -37,6 +37,33 @@ Run `just e2e-visual` when a change can affect window creation, sidebar sizing, 
 
 Live PostgreSQL, MySQL, MariaDB, and SQL Server jobs run in GitHub Actions.
 
+### Live databases in Docker
+
+`docker/compose.yaml` runs the same database versions as CI, seeded from
+`tests/seed_*.sql`, plus a runner image with Neovim, every database client, and
+DuckDB. Only Docker with the Compose plugin is needed on the host (x86_64; the
+SQL Server image has no arm64 build).
+
+```sh
+just test-docker mysql-8.4        # or postgresql-16, mariadb-11.8, sqlserver-2025
+just test-docker-all              # every database
+just db-up postgres               # start and seed databases without running tests
+just db-down                      # stop them and discard their data
+```
+
+Without `just`, run `docker/test-live.sh mysql-8.4` (or `all`) directly. Data
+lives in tmpfs, so `just db-down` followed by `just db-up` starts again from the
+seed files. Starting SQL Server accepts its developer edition EULA, as CI does.
+
+The databases also listen on localhost for trying grip by hand:
+
+| Database | URL |
+|---|---|
+| PostgreSQL 16 | `postgresql://postgres:grip@127.0.0.1:15432/grip_test` |
+| MySQL 8.4 | `mysql://root:grip@127.0.0.1:13306/grip_test` |
+| MariaDB 11.8 | `mariadb://root:grip@127.0.0.1:13307/grip_test` |
+| SQL Server 2025 | `sqlserver://sa:Grip-ci-2025!@127.0.0.1:11433/grip_test?encrypt=optional&trust_server_certificate=true` |
+
 ## Scan for secrets
 
 Enable the repository's optional native Git hook:

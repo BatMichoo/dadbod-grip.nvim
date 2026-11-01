@@ -46,6 +46,22 @@ test-live database:
     esac
     just test
 
+# Start and seed the Docker test databases (all, or the named compose services)
+db-up *services:
+    docker compose -f docker/compose.yaml up -d --wait {{ services }}
+
+# Stop the Docker test databases and discard their data
+db-down:
+    docker compose -f docker/compose.yaml down --remove-orphans
+
+# Run the live suite in the Docker runner (e.g. just test-docker mysql-8.4)
+test-docker +databases:
+    docker/test-live.sh {{ databases }}
+
+# Run the live suite in the Docker runner against every database
+test-docker-all:
+    docker/test-live.sh all
+
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.
 # Install: luarocks --lua-version=5.1 --local install luacheck
 lint:

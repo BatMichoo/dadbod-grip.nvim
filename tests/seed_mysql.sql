@@ -7,6 +7,9 @@
 -- foreign keys, pagination-scale data, aggregation targets.
 
 SET sql_mode = 'ANSI_QUOTES';
+-- This file is UTF-8. Say so, or a client running under a non-UTF-8 locale
+-- (the mysql image's own init client) stores the unicode rows double-encoded.
+SET NAMES utf8mb4;
 
 -- Clean slate (FK-aware drop order)
 DROP TABLE IF EXISTS "order_items";
