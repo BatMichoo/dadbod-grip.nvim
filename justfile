@@ -41,7 +41,10 @@ test-live database:
         export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
         export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
         ;;
-      sqlite|sqlserver-2025) ;;
+      sqlserver-2025)
+        export GRIP_TEST_SQLSERVER_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_SQLSERVER=1
+        ;;
+      sqlite) ;;
       *) echo "Unknown live database: {{ database }}" >&2; exit 2 ;;
     esac
     just test
