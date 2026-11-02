@@ -182,23 +182,34 @@ test("progress: a nested call relabels the message and hands it back", function(
   end
 end)
 
-test("progress: notifications from inside fn come after the final update", function()
-  local real_notify, seen = vim.notify, {}
-  vim.notify = function(msg) seen[#seen + 1] = msg end
-  local order = {}
-  local calls = with_progress(function()
+if vim.fn.has("nvim-0.12") == 1 then
+  -- The built-in vim.notify echoes through nvim_echo, which with_progress
+  -- records, so the calls show the order the cmdline would.
+  test("progress: built-in notifications from inside fn come after the final update", function()
+    local calls = with_progress(function()
+      ui.blocking("work...", function()
+        vim.notify("inside")
+        ui.notify("status", vim.log.levels.INFO, "test")
+      end)
+    end)
+    local texts = vim.tbl_map(function(call) return tostring(call.text) end, calls)
+    eq(table.concat(texts, "|"), "work...|work: done|nil|inside|status", "echo order")
+  end)
+end
+
+test("progress: a notification plugin's vim.notify is never replaced", function()
+  local real_notify, seen, during = vim.notify, {}, nil
+  local plugin_notify = function(msg) seen[#seen + 1] = msg end
+  vim.notify = plugin_notify
+  with_progress(function()
     ui.blocking("work...", function()
+      during = vim.notify
       vim.notify("inside")
-      ui.notify("status", vim.log.levels.INFO, "test")
-      order[#order + 1] = #seen
     end)
   end)
-  local notify_after = vim.notify
   vim.notify = real_notify
-  eq(order[1], 0, "nothing shown while the progress message is up")
-  eq(table.concat(seen, ","), "inside,status", "held notifications shown in order")
-  eq(calls[#calls].text, nil, "the clear came before them")
-  assert(notify_after ~= nil, "vim.notify restored")
+  assert(during == plugin_notify, "vim.notify swapped while fn ran")
+  eq(table.concat(seen, ","), "inside", "shown straight away")
 end)
 
 test("progress: vim.notify is restored after an error", function()

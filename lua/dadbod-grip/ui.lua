@@ -526,12 +526,17 @@ local function progress_spinner(msg)
   echo(msg)
   pcall(vim.cmd, "redraw")
 
-  local held, real_notify = {}, vim.notify
-  local function hold(...)
-    local args = pack(...)
-    held[#held + 1] = function() vim.notify(unpack_(args, 1, args.n)) end
+  -- Only the built-in vim.notify shares the cmdline with the progress message.
+  -- A notification plugin's is left alone: it shows notifications its own way,
+  -- and noice warns when vim.notify stops being its function.
+  local held, real_notify, hold = {}, vim.notify, nil
+  if core_notify() then
+    hold = function(...)
+      local args = pack(...)
+      held[#held + 1] = function() vim.notify(unpack_(args, 1, args.n)) end
+    end
+    _held, vim.notify = held, hold
   end
-  _held, vim.notify = held, hold
 
   -- No redraw: an inner call's label shows on the next one, so it does not
   -- flush a half-built layout (see M.blocking).
@@ -542,7 +547,7 @@ local function progress_spinner(msg)
 
   function spinner.close(ok)
     _held = nil
-    if vim.notify == hold then vim.notify = real_notify end
+    if hold and vim.notify == hold then vim.notify = real_notify end
     opts.status = ok and "success" or "failed"
     echo(msg:gsub("%.*%s*$", "") .. (ok and ": done" or ": failed"))
     -- The default cmdline would keep showing the finished message; ui2 and
