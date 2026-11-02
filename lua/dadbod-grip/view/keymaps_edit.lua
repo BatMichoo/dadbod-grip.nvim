@@ -7,6 +7,7 @@ local data   = require("dadbod-grip.data")
 local db     = require("dadbod-grip.db")
 local qmod   = require("dadbod-grip.query")
 local sql    = require("dadbod-grip.sql")
+local ui     = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -188,9 +189,9 @@ function M.setup(bufnr, ctx)
       view.render(bufnr, prev_state)
       local remaining = #session._undo_stack
       if remaining > 0 then
-        vim.notify("Undo (" .. remaining .. " more)", vim.log.levels.INFO)
+        ui.notify("Undo (" .. remaining .. " more)", vim.log.levels.INFO, "undo")
       else
-        vim.notify("Undo (back to original)", vim.log.levels.INFO)
+        ui.notify("Undo (back to original)", vim.log.levels.INFO, "undo")
       end
       return
     end
@@ -216,7 +217,7 @@ function M.setup(bufnr, ctx)
       return
     end
 
-    vim.notify("Nothing to undo", vim.log.levels.INFO)
+    ui.notify("Nothing to undo", vim.log.levels.INFO, "undo")
   end, "Undo last edit")
 
   -- U: undo all (resets to original state) or cancel mutation
@@ -268,7 +269,7 @@ function M.setup(bufnr, ctx)
     end
     local val = cell.value or ""
     vim.fn.setreg("+", val)
-    vim.notify("Yanked: " .. val, vim.log.levels.INFO)
+    ui.notify("Yanked: " .. val, vim.log.levels.INFO, "yank")
   end, "Yank cell value")
 
   -- Y: yank row as CSV
@@ -288,7 +289,7 @@ function M.setup(bufnr, ctx)
     end
     local csv = table.concat(parts, ",")
     vim.fn.setreg("+", csv)
-    vim.notify("Yanked row as CSV", vim.log.levels.INFO)
+    ui.notify("Yanked row as CSV", vim.log.levels.INFO, "yank")
   end, "Yank row as CSV")
 
   -- gY: yank table as CSV
@@ -308,7 +309,7 @@ function M.setup(bufnr, ctx)
       table.insert(lines_out, table.concat(parts, ","))
     end
     vim.fn.setreg("+", table.concat(lines_out, "\n"))
-    vim.notify("Yanked " .. #r.ordered .. " rows as CSV", vim.log.levels.INFO)
+    ui.notify("Yanked " .. #r.ordered .. " rows as CSV", vim.log.levels.INFO, "yank")
   end, "Yank table as CSV")
 
   -- gy: yank table as Markdown pipe table

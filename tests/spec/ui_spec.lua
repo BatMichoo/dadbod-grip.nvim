@@ -110,6 +110,133 @@ test("blocking: a later top-level call still opens its own float", function()
   eq(during, win_count() + 1, "spinner state was released")
 end)
 
+-- ── progress messages (Neovim 0.12+) ────────────────────────────────────────
+-- With a UI attached on 0.12+, blocking() reports through nvim_echo
+-- kind="progress" instead of the float. Forced on here and nvim_echo recorded,
+-- since a headless run has no UI and would print the messages to stdout.
+
+--- Run fn with progress forced on and nvim_echo recorded; returns the calls.
+local function with_progress(fn)
+  local calls, real_echo = {}, vim.api.nvim_echo
+  vim.api.nvim_echo = function(chunks, history, opts)
+    calls[#calls + 1] = {
+      text = chunks[1] and chunks[1][1], hl = chunks[1] and chunks[1][2],
+      history = history, opts = vim.deepcopy(opts),
+    }
+    return opts.id or 41
+  end
+  ui._set_progress(true)
+  local ok, err = pcall(fn, calls)
+  ui._set_progress(nil)
+  vim.api.nvim_echo = real_echo
+  if not ok then error(err, 0) end
+  return calls
+end
+
+local function progress_calls(calls)
+  return vim.tbl_filter(function(c) return c.opts.kind == "progress" end, calls)
+end
+
+test("progress: running, then success under one id, then a clear; no float", function()
+  local before = win_count()
+  local during
+  local calls = with_progress(function()
+    ui.blocking("  querying users...", function() during = win_count() end)
+  end)
+  eq(during, before, "no float window")
+  eq(#calls, 3, "echo calls")
+  eq(calls[1].text, "querying users...", "running label trimmed")
+  eq(calls[1].opts.status, "running", "first status")
+  eq(calls[1].opts.source, "dadbod-grip", "source")
+  eq(calls[1].history, false, "progress stays out of :messages")
+  eq(calls[2].text, "querying users: done", "final text")
+  eq(calls[2].opts.status, "success", "final status")
+  eq(calls[2].opts.id, 41, "final update reuses the id")
+  eq(calls[3].text, nil, "empty echo clears the cmdline")
+end)
+
+test("progress: an error marks it failed and is re-raised", function()
+  local ok, err
+  local calls = with_progress(function()
+    ok, err = pcall(ui.blocking, "loading...", function() error("boom") end)
+  end)
+  eq(ok, false, "error re-raised")
+  assert(tostring(err):find("boom"), "error message kept")
+  local final = progress_calls(calls)[2]
+  eq(final.opts.status, "failed", "final status")
+  eq(final.text, "loading: failed", "final text")
+end)
+
+test("progress: a nested call relabels the message and hands it back", function()
+  local a, b, c
+  local calls = with_progress(function()
+    a, b, c = ui.blocking("outer...", function()
+      return ui.blocking("inner...", function() return nil, nil, "x" end)
+    end)
+  end)
+  eq(a, nil, "first"); eq(b, nil, "second"); eq(c, "x", "third")
+  local texts = vim.tbl_map(function(call) return call.text end, progress_calls(calls))
+  eq(table.concat(texts, "|"), "outer...|inner...|outer...|outer: done", "labels")
+  for _, call in ipairs(progress_calls(calls)) do
+    if call.opts.id then eq(call.opts.id, 41, "one message id") end
+  end
+end)
+
+test("progress: notifications from inside fn come after the final update", function()
+  local real_notify, seen = vim.notify, {}
+  vim.notify = function(msg) seen[#seen + 1] = msg end
+  local order = {}
+  local calls = with_progress(function()
+    ui.blocking("work...", function()
+      vim.notify("inside")
+      ui.notify("status", vim.log.levels.INFO, "test")
+      order[#order + 1] = #seen
+    end)
+  end)
+  local notify_after = vim.notify
+  vim.notify = real_notify
+  eq(order[1], 0, "nothing shown while the progress message is up")
+  eq(table.concat(seen, ","), "inside,status", "held notifications shown in order")
+  eq(calls[#calls].text, nil, "the clear came before them")
+  assert(notify_after ~= nil, "vim.notify restored")
+end)
+
+test("progress: vim.notify is restored after an error", function()
+  local real_notify = vim.notify
+  with_progress(function()
+    pcall(ui.blocking, "x...", function() error("nope") end)
+  end)
+  assert(vim.notify == real_notify, "vim.notify restored")
+end)
+
+-- ── ui.notify ───────────────────────────────────────────────────────────────
+
+test("notify: a notification plugin gets the id as opts.id", function()
+  local real_notify, got = vim.notify, nil
+  vim.notify = function(msg, level, opts) got = { msg = msg, level = level, opts = opts } end
+  ui.notify("Watch mode on", vim.log.levels.INFO, "watch")
+  vim.notify = real_notify
+  eq(got.msg, "Watch mode on", "message")
+  eq(got.level, vim.log.levels.INFO, "level")
+  eq(got.opts.id, "dadbod-grip.watch", "id")
+end)
+
+if vim.fn.has("nvim-0.12") == 1 then
+  test("notify: with the built-in vim.notify, echoes with the id", function()
+    local calls = with_progress(function()
+      ui.notify("Undo (2 more)", vim.log.levels.INFO, "undo")
+      ui.notify("careful", vim.log.levels.WARN, "undo")
+      ui.notify("broken", vim.log.levels.ERROR, "undo")
+    end)
+    eq(#calls, 3, "echo calls")
+    eq(calls[1].opts.id, "dadbod-grip.undo", "id")
+    eq(calls[1].history, true, "kept in :messages")
+    eq(calls[1].hl, nil, "info has no highlight")
+    eq(calls[2].hl, "WarningMsg", "warning highlight")
+    eq(calls[3].opts.err, true, "error flag")
+  end)
+end
+
 -- ── input / confirm ─────────────────────────────────────────────────────────
 
 --- Answer the next prompt with `keys`, then run fn().

@@ -387,59 +387,74 @@ function M.dismiss_float(opts)
   return close
 end
 
---- The float owned by the outermost blocking() call, or nil when none is up.
---- @type table|nil  { msg = string }
-local _spinner = nil
+-- Neovim 0.12 progress messages (nvim_echo kind="progress"): shown by ui2, the
+-- default cmdline, statusline components (vim.ui.progress_status()) and
+-- progress plugins alike. Older versions get the spinner float.
+local HAS_PROGRESS = vim.fn.has("nvim-0.12") == 1
 
---- Show an animated spinner float, run fn(), then clear the float.
----
---- IMPORTANT: fn() must be synchronous OR use vim.wait() for async work.
---- If fn() returns before work is done, the float closes prematurely.
---- For async callers (e.g. curl/jobstart), use this pattern inside fn():
----
----   local done = false
----   start_async(function(result) ... done = true end)
----   vim.wait(30000, function() return done end, 50)
----
---- The spinner (braille frames) animates during vim.system():wait() and
---- vim.wait() calls inside fn() because both pump the libuv event loop.
---- The float opens with noautocmd and closes under eventignore="all": plugin
---- autocmds (WinNew/WinEnter) add 200-400ms from noice/treesitter/nvim-cmp.
----
---- Calls nest: only the outermost one owns the float, and an inner call just
---- relabels it for the duration of its own work. Closing the inner float would
---- flush whatever the outer call has built so far to the terminal -- for the
---- workspace that means a half-open sidebar over an empty content area, the
---- exact flicker the spinner is there to cover.
----
---- @param msg string
---- @param fn  function  must be synchronous or use vim.wait() internally
---- @return    any       all return values from fn() forwarded
+-- Test seam: nil decides by version and attached UI, true/false forces it.
+local _force_progress = nil
+function M._set_progress(value)
+  _force_progress = value
+end
+
+--- Whether blocking() reports through progress messages. Without a UI (a
+--- headless script) nvim_echo writes to stdout, so it keeps the float there.
+local function use_progress()
+  if _force_progress ~= nil then return _force_progress end
+  return HAS_PROGRESS and #vim.api.nvim_list_uis() > 0
+end
+
+-- While the outermost blocking() call runs on progress messages, notifications
+-- are queued here and shown after its final progress update, which would
+-- otherwise paint over them in the default cmdline.
+local _held = nil
+
+--- Whether vim.notify is still Neovim's own, which ignores its opts (so no
+--- message id) and just calls nvim_echo, rather than a notification plugin's.
+local function core_notify()
+  local source = debug.getinfo(vim.notify, "S").source
+  -- "vim/_core/editor" when precompiled, a path ending in editor.lua if not.
+  return source:find("vim/_core/editor", 1, true) ~= nil
+end
+
+--- vim.notify for a status message that replaces its previous one instead of
+--- stacking up: a toggle flipped twice, an undo countdown, repeated yanks.
+--- On Neovim 0.12 with the built-in vim.notify it is echoed with a message id,
+--- which ui2 uses to update the message in place (:messages still keeps each
+--- one); a notification plugin receives the id as opts.id, which the ones that
+--- support replacing use.
+--- @param msg   string
+--- @param level integer|nil  vim.log.levels
+--- @param id    string       per-purpose name, e.g. "watch"
+function M.notify(msg, level, id)
+  if _held then
+    _held[#_held + 1] = function() M.notify(msg, level, id) end
+    return
+  end
+  id = "dadbod-grip." .. id
+  if HAS_PROGRESS and core_notify() then
+    -- Same rendering as the built-in vim.notify, plus the id.
+    vim.api.nvim_echo({ { msg, level == vim.log.levels.WARN and "WarningMsg" or nil } }, true,
+      { id = id, err = level == vim.log.levels.ERROR })
+  else
+    vim.notify(msg, level, { id = id })
+  end
+end
+
 -- { ok, r1, r2, ... } with the count kept in `n`: `#` stops at the first nil,
 -- so a plain table would drop the err of a (nil, nil, err) return.
 local function pack(...)
   return { n = select("#", ...), ... }
 end
 
-function M.blocking(msg, fn)
-  -- table.pack/table.unpack are Lua 5.2+; LuaJIT is 5.1.
-  -- pack(pcall(fn)) => { ok, r1, r2, ..., n = count } or { false, errmsg }
-  -- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps
-  -- working if Neovim ever moves to a 5.2+ VM, where bare `unpack` is gone.
-  -- luacheck: ignore 143
-  local unpack_ = table.unpack or unpack
+-- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps
+-- working if Neovim ever moves to a 5.2+ VM, where bare `unpack` is gone.
+local unpack_ = table.unpack or unpack -- luacheck: ignore 143
 
-  -- Nested: borrow the float that is already up, restoring its message so the
-  -- outer call goes back to describing its own work when this one returns.
-  if _spinner then
-    local outer_msg = _spinner.msg
-    _spinner.msg = msg
-    local rets = pack(pcall(fn))
-    _spinner.msg = outer_msg
-    if not rets[1] then error(rets[2], 2) end
-    return unpack_(rets, 2, rets.n)
-  end
-
+--- Spinner float, centered on the editor (Neovim < 0.12).
+local function float_spinner(msg)
+  local spinner = { msg = msg }
   local frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
   local fi = 1
 
@@ -457,10 +472,6 @@ function M.blocking(msg, fn)
     noautocmd = true,
   })
 
-  -- Claimed only now: a nested call reaching this far would have had no float
-  -- to borrow, and every one after it must find a live window to relabel.
-  _spinner = { msg = msg }
-
   -- Best-effort paint before fn() runs. Keep this on Neovim's stable Ex
   -- command rather than the experimental nvim__redraw API.
   pcall(vim.cmd, "redraw")
@@ -468,36 +479,137 @@ function M.blocking(msg, fn)
   -- Animate: timer fires during vim.system():wait() and vim.wait() event loop pumps.
   -- libuv timer callbacks are "fast events" - nvim API calls are forbidden there.
   -- vim.schedule_wrap defers the API work into the main loop, which pumps during wait().
-  -- Reads _spinner.msg, not the upvalue, so a nested call's label shows while
+  -- Reads spinner.msg, not the upvalue, so a nested call's label shows while
   -- it runs.
   local timer = vim.uv.new_timer()
   timer:start(80, 80, vim.schedule_wrap(function()
     fi = (fi % #frames) + 1
     if vim.api.nvim_buf_is_valid(buf) then
       pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false,
-        { "", "  " .. frames[fi] .. " " .. ((_spinner and _spinner.msg) or msg), "" })
+        { "", "  " .. frames[fi] .. " " .. spinner.msg, "" })
       pcall(vim.cmd, "redraw")
     end
   end))
 
+  function spinner.label(text)
+    spinner.msg = text
+  end
+
+  function spinner.close()
+    timer:stop()
+    timer:close()
+    -- Close float, suppressing autocmds again (nvim_win_close has no
+    -- noautocmd option; both calls are pcall'd, so the option is always restored).
+    local ei = vim.o.eventignore
+    vim.o.eventignore = "all"
+    pcall(vim.api.nvim_win_close, win, true)
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    vim.o.eventignore = ei
+    -- Flush the close to terminal so the float disappears before the next render.
+    pcall(vim.cmd, "redraw")
+  end
+
+  return spinner
+end
+
+--- Progress message (Neovim 0.12+). The callers' labels are padded for the
+--- float, so they are trimmed here.
+local function progress_spinner(msg)
+  local opts = { kind = "progress", source = "dadbod-grip", title = "grip", status = "running" }
+  local function echo(text)
+    opts.id = vim.api.nvim_echo({ { vim.trim(text) } }, false, opts)
+  end
+  local spinner = { msg = msg }
+  -- Redraw first: right after a confirm() dialog its lines are still on the
+  -- message area, and echoing below them would raise a hit-enter prompt.
+  pcall(vim.cmd, "redraw")
+  echo(msg)
+  pcall(vim.cmd, "redraw")
+
+  local held, real_notify = {}, vim.notify
+  local function hold(...)
+    local args = pack(...)
+    held[#held + 1] = function() vim.notify(unpack_(args, 1, args.n)) end
+  end
+  _held, vim.notify = held, hold
+
+  -- No redraw: an inner call's label shows on the next one, so it does not
+  -- flush a half-built layout (see M.blocking).
+  function spinner.label(text)
+    spinner.msg = text
+    echo(text)
+  end
+
+  function spinner.close(ok)
+    _held = nil
+    if vim.notify == hold then vim.notify = real_notify end
+    opts.status = ok and "success" or "failed"
+    echo(msg:gsub("%.*%s*$", "") .. (ok and ": done" or ": failed"))
+    -- The default cmdline would keep showing the finished message; ui2 and
+    -- progress plugins have their own way of retiring it.
+    vim.api.nvim_echo({}, false, {})
+    for _, show in ipairs(held) do show() end
+  end
+
+  return spinner
+end
+
+--- The spinner owned by the outermost blocking() call, or nil when none is up.
+--- @type table|nil  { msg: string, label: fun(text), close: fun(ok) }
+local _spinner = nil
+
+--- Show progress for fn(): a progress message on Neovim 0.12+ (see
+--- |progress-message|), an animated spinner float before that.
+---
+--- IMPORTANT: fn() must be synchronous OR use vim.wait() for async work.
+--- If fn() returns before work is done, the spinner ends prematurely.
+--- For async callers (e.g. curl/jobstart), use this pattern inside fn():
+---
+---   local done = false
+---   start_async(function(result) ... done = true end)
+---   vim.wait(30000, function() return done end, 50)
+---
+--- The float's braille frames animate during vim.system():wait() and
+--- vim.wait() calls inside fn() because both pump the libuv event loop.
+--- The float opens with noautocmd and closes under eventignore="all": plugin
+--- autocmds (WinNew/WinEnter) add 200-400ms from noice/treesitter/nvim-cmp.
+---
+--- With progress messages, notifications raised inside fn() are shown after
+--- the final progress update rather than underneath it.
+---
+--- Calls nest: only the outermost one owns the spinner, and an inner call just
+--- relabels it for the duration of its own work. Closing the inner float would
+--- flush whatever the outer call has built so far to the terminal -- for the
+--- workspace that means a half-open sidebar over an empty content area, the
+--- exact flicker the spinner is there to cover.
+---
+--- @param msg string
+--- @param fn  function  must be synchronous or use vim.wait() internally
+--- @return    any       all return values from fn() forwarded
+function M.blocking(msg, fn)
+  -- Nested: borrow the spinner that is already up, restoring its message so
+  -- the outer call goes back to describing its own work when this one returns.
+  if _spinner then
+    local spinner, outer_msg = _spinner, _spinner.msg
+    spinner.label(msg)
+    local rets = pack(pcall(fn))
+    spinner.label(outer_msg)
+    if not rets[1] then error(rets[2], 2) end
+    return unpack_(rets, 2, rets.n)
+  end
+
+  -- Claimed only once the spinner is up: a nested call reaching this far
+  -- would have had none to borrow, and every one after it must find a live
+  -- spinner to relabel.
+  local spinner = (use_progress() and progress_spinner or float_spinner)(msg)
+  _spinner = spinner
+
   local rets = pack(pcall(fn))
 
-  timer:stop()
-  timer:close()
-  -- Released before the close below: anything the cleanup triggers must see
-  -- no spinner rather than one that is about to vanish.
+  -- Released before closing: anything the cleanup triggers must see no
+  -- spinner rather than one that is about to vanish.
   _spinner = nil
-
-  -- Close float, suppressing autocmds again (nvim_win_close has no
-  -- noautocmd option; both calls are pcall'd, so the option is always restored).
-  local ei = vim.o.eventignore
-  vim.o.eventignore = "all"
-  pcall(vim.api.nvim_win_close, win, true)
-  pcall(vim.api.nvim_buf_delete, buf, { force = true })
-  vim.o.eventignore = ei
-
-  -- Flush the close to terminal so the float disappears before the next render.
-  pcall(vim.cmd, "redraw")
+  spinner.close(rets[1])
 
   if not rets[1] then error(rets[2], 2) end
   return unpack_(rets, 2, rets.n)

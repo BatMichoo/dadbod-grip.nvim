@@ -293,7 +293,7 @@ local function grid_callbacks(conn, table_name_arg, query_sql)
           -- Existing DB row: toggle delete mark
           local was_deleted = session_d.state.deleted[row_idx]
           local new_state = data.toggle_delete(session_d.state, row_idx)
-          vim.notify(was_deleted and "Unmarked" or "Marked for deletion", vim.log.levels.INFO)
+          ui.notify(was_deleted and "Unmarked" or "Marked for deletion", vim.log.levels.INFO, "mark")
           view.apply_edit(bid, new_state)
         end
       end,

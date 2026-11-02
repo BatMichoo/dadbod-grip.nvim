@@ -178,7 +178,7 @@ function M.setup(url, ctx)
 
   -- Refresh (r and R)
   local function do_refresh()
-    ui.blocking("Grip: refreshing schema...", function()
+    ui.blocking("refreshing schema...", function()
       state.items = nil
       ctx.clear_metadata(state)
       ctx.fetch_tables(state)

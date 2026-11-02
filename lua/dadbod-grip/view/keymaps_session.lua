@@ -43,13 +43,13 @@ function M.setup(bufnr, ctx)
     if not session then return end
     if session.watch_ms then
       stop_watch(bufnr)
-      vim.notify("Watch mode off", vim.log.levels.INFO)
+      ui.notify("Watch mode off", vim.log.levels.INFO, "watch")
     else
       local ms = (session.opts and session.opts.watch_ms) or 5000
       start_watch(bufnr, ms)
       local secs = ms / 1000
       local label = secs == math.floor(secs) and tostring(math.floor(secs)) .. "s" or tostring(secs) .. "s"
-      vim.notify("Watch mode on (" .. label .. ")", vim.log.levels.INFO)
+      ui.notify("Watch mode on (" .. label .. ")", vim.log.levels.INFO, "watch")
     end
   end, "Toggle watch mode (auto-refresh)")
 
@@ -85,7 +85,7 @@ function M.setup(bufnr, ctx)
       end
       session.write_mode = false
       update_winbar(bufnr)
-      vim.notify("Write mode off", vim.log.levels.INFO)
+      ui.notify("Write mode off", vim.log.levels.INFO, "write_mode")
     else
       -- Turning ON: destructive-action confirm
       local short = vim.fn.fnamemodify(file_path, ":t")
@@ -95,7 +95,7 @@ function M.setup(bufnr, ctx)
       end
       session.write_mode = true
       update_winbar(bufnr)
-      vim.notify("Write mode on: edits will overwrite " .. short, vim.log.levels.INFO)
+      ui.notify("Write mode on: edits will overwrite " .. short, vim.log.levels.INFO, "write_mode")
     end
   end, "Toggle write mode (overwrite file on apply)")
 

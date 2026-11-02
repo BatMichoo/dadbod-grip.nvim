@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Neovim 0.12+: loading a table, profile, ER diagram or connection reports a native progress
+  message (`nvim_echo` with `kind = "progress"`) instead of the centered spinner float, so it
+  appears wherever messages are shown (the cmdline, ui2, `vim.ui.progress_status()` in a
+  statusline, progress plugins). Notifications raised while it runs are shown after it finishes.
+  Neovim 0.10 and 0.11 keep the float.
+- Neovim 0.12+: watch and write mode toggles, the undo countdown, mark-for-deletion and yank
+  messages carry a message id, so ui2's message window updates one line instead of stacking
+  them. Notification plugins receive the id as `opts.id`.
 - Per-project state (`connections.json`, `history.jsonl`, `filters.json`, `queries/`) moves out of
   the repository's `.grip/` folder into `stdpath("state")/grip/projects/<name>-<hash>`
   (`~/.local/state/nvim/` on Linux, `%LOCALAPPDATA%\nvim-data\` on Windows), so nothing needs adding

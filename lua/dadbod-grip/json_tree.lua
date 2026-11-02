@@ -301,7 +301,7 @@ function M.open(value, opts)
   local function yank(text, what)
     vim.fn.setreg('"', text)
     pcall(vim.fn.setreg, "+", text)
-    vim.notify("Yanked " .. what, vim.log.levels.INFO)
+    ui.notify("Yanked " .. what, vim.log.levels.INFO, "yank")
   end
 
   local map_opts = { buffer = buf, silent = true, nowait = true }

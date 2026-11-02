@@ -5,6 +5,7 @@
 
 local data   = require("dadbod-grip.data")
 local db     = require("dadbod-grip.db")
+local ui     = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -175,7 +176,7 @@ function M.setup(bufnr, ctx)
     end
     local text = table.concat(values, "\n")
     vim.fn.setreg("+", text)
-    vim.notify("Yanked " .. #values .. " cells from " .. cell.col_name, vim.log.levels.INFO)
+    ui.notify("Yanked " .. #values .. " cells from " .. cell.col_name, vim.log.levels.INFO, "yank")
   end, "Yank selected cells in column")
 
   -- gl: toggle live SQL preview float
