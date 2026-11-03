@@ -142,17 +142,23 @@ e2e-visual: seed-sqlite
     sync="$session"
     expected_columns="${GRIP_E2E_EXPECT_COLUMNS:-100}"
 
-    cleanup() { tmux kill-session -t "$session" 2>/dev/null || true; }
+    status_file="$(mktemp)"
+
+    cleanup() { tmux kill-session -t "$session" 2>/dev/null || true; rm -f "$status_file"; }
     trap cleanup EXIT INT TERM
 
     tmux new-session -d -s "$session" -c "$PWD" /bin/bash --noprofile --norc
     tmux set-window-option -t "$session" window-size manual
-    tmux set-option -t "$session" remain-on-exit on
     tmux resize-window -t "$session" -x 100 -y 36
 
-    printf -v launch 'exec env GRIP_TMUX_SYNC=%q GRIP_EXPECT_COLUMNS=%q %q --cmd %q -u %q -c %q' \
+    printf -v launch 'env GRIP_TMUX_SYNC=%q GRIP_EXPECT_COLUMNS=%q %q --cmd %q -u %q -c %q' \
       "$sync" "$expected_columns" "$nvim_bin" "set rtp^=." "tests/minimal_init.lua" \
       "lua vim.schedule(function() dofile('tests/fixtures/workspace_layout_integration.lua') end)"
+    # The pane's shell records Neovim's exit status. tmux's own
+    # #{pane_dead_status} is not reliable: tmux 3.4 (Ubuntu 24.04, the Docker
+    # runner) never reaps a pane process that ran Neovim and reports it empty.
+    printf -v launch '%s; echo $? > %q; tmux wait-for -S %q' \
+      "$launch" "$status_file" "$sync-exited"
     tmux send-keys -t "$session" "$launch" Enter
 
     wait_for() {
@@ -235,17 +241,13 @@ e2e-visual: seed-sqlite
     snapshot "GripImport committed rows"
     tmux send-keys -t "$session" :qa! Enter
 
-    for _ in {1..100}; do
-      [[ "$(tmux display-message -p -t "$session" '#{pane_dead}')" == 1 ]] && break
-      sleep 0.05
-    done
-    if [[ "$(tmux display-message -p -t "$session" '#{pane_dead}')" != 1 ]]; then
+    if ! timeout 5s tmux wait-for "$sync-exited"; then
       echo "e2e-visual Neovim process did not exit" >&2
       tmux capture-pane -p -t "$session" >&2
       exit 1
     fi
 
-    status="$(tmux display-message -p -t "$session" '#{pane_dead_status}')"
+    status="$(<"$status_file")"
     if [[ "$status" != 0 ]]; then
       echo "e2e-visual failed with status $status" >&2
       tmux capture-pane -p -t "$session" >&2
