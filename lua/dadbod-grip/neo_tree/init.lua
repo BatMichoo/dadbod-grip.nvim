@@ -144,6 +144,7 @@ M.default_config = {
       ["<2-LeftMouse>"] = "open",
       ["<space>"] = "toggle_node",
       ["s"] = "open_records",
+      ["<F5>"] = "execute",
       ["S"] = "open_split",
       ["R"] = "refresh",
       ["y"] = "copy_name",

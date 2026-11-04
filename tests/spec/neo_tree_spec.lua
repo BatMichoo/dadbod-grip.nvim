@@ -181,6 +181,23 @@ test("s opens the table's records outside the tree", function()
   eq(vim.bo[vim.api.nvim_win_get_buf(schema.get_winid())].filetype, "neo-tree", "tree still shown")
 end)
 
+test("<F5> runs a table's records and nothing on other rows", function()
+  local view = require("dadbod-grip.view")
+  schema.toggle(URL)
+  local tree_buf = tree_state().bufnr
+  eq(vim.fn.maparg("<F5>", "n", false, true).buffer, 1, "mapped in the grip source's buffer")
+  cursor_to("users")
+  commands().open(tree_state())
+  cursor_to("Columns", "users")
+  vim.api.nvim_feedkeys(vim.keycode("<F5>"), "x", false)
+  eq(vim.api.nvim_get_current_buf(), tree_buf, "a folder has no query to run")
+  cursor_to("orders")
+  vim.api.nvim_feedkeys(vim.keycode("<F5>"), "x", false)
+  local session = view._sessions[vim.api.nvim_get_current_buf()]
+  assert(session, "a grid is focused")
+  eq(session.state.table_name, "orders", "grid table")
+end)
+
 test("connecting lays the workspace out beside the tree", function()
   local paths = require("dadbod-grip.paths")
   local orig_root = paths.project_root

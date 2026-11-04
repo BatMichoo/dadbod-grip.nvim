@@ -65,6 +65,17 @@ function M.open_records(state)
   if tbl then require("dadbod-grip.schema").open_table(tbl, state.grip_url) end
 end
 
+--- <F5>: the run key, as in the built-in sidebar. On a table it opens the
+--- records like s; folders, columns and groups have no query of their own,
+--- so it does nothing there.
+function M.execute(state)
+  local node = node_of(state)
+  local extra = node and node.extra or {}
+  if extra.kind == "table" and not extra.is_file then
+    require("dadbod-grip.schema").open_table(extra.table_name, state.grip_url)
+  end
+end
+
 --- S: the table's records in a new split, beside the grid already open.
 function M.open_split(state)
   local node = node_of(state)

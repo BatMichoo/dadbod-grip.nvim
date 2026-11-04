@@ -956,6 +956,8 @@ Neo-tree source keymaps:
   <Space>         Expand/collapse, loading a folder the first time
   s               Open the table's records (from the table, a folder, or
                   an item)
+  <F5>            Open the records of the table under the cursor; does
+                  nothing on other rows
   S               Open the table's records in a new split
   R               Refresh the schema, keeping open folders open
   y               Yank table, column or routine name to clipboard
