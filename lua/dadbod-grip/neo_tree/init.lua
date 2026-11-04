@@ -91,7 +91,7 @@ local function build(url, expanded)
   end
   local root = { kind = "root", id = ROOT_ID, name = schema.title(state), children = children }
   if #children == 0 then
-    root.children = { { kind = "message", id = "grip\0empty", name = state.items and "(no objects found)"
+    root.children = { { kind = "message", id = "grip\0empty", name = state.items and "(database empty)"
       or "(could not load the schema)" } }
   end
   return to_item(root), state

@@ -340,7 +340,7 @@ local function render(state, anchor)
     end
   end
   if #nodes == 0 and state.items then
-    line(state.filter and " (no matches)" or " (no objects found)", "GripReadonly")
+    line(state.filter and " (no matches)" or " (database empty)", "GripReadonly")
   end
   line("")
   line(" 1:conn 2:pad 3:grid", "GripReadonly")

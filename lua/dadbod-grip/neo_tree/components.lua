@@ -10,13 +10,27 @@ local M = {}
 --- Groups and folders read as headings, like the built-in sidebar's.
 local HEADINGS = { schema = true, header = true, facet = true, partitions = true }
 
-function M.grip_icon(_, node)
+--- Icons after a table's or view's fold mark. Override per renderer, e.g.
+--- { "grip_icon", table = "T", view = "V" }; an empty string drops the icon.
+local OBJECT_ICONS = { table = "󰓫", view = "󰈈" }
+
+function M.grip_icon(config, node)
   local extra = node.extra or {}
   local text
   if extra.kind == "root" or extra.kind == "message" then
     return { text = "" }
   elseif node.type == "directory" then
     text = node:is_expanded() and "▼" or "▶"
+    if extra.kind == "table" and not extra.is_file then
+      local object = extra.type == "view" and "view" or "table"
+      local icon = config[object] or OBJECT_ICONS[object]
+      if icon ~= "" then
+        return {
+          { text = text .. " ", highlight = highlights.FILE_ICON },
+          { text = icon .. " ", highlight = highlights.DIRECTORY_ICON },
+        }
+      end
+    end
   elseif extra.kind == "routine" then
     text = extra.type == "procedure" and "◇" or "ƒ"
   elseif extra.kind == "column" then

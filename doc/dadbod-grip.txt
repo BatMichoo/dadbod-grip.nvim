@@ -940,6 +940,16 @@ Procedures categories, and under each table its folders and partitions. It
 shares the sidebar's cache, so a folder fetched in one is not fetched again in
 the other. Folds are neo-tree's own.
 
+Tables and views carry a Nerd Font icon (󰓫 and 󰈈). Replace or drop them in
+neo-tree's setup; an empty string removes the icon: >lua
+
+  grip = {
+    renderers = {
+      directory = { { "indent" }, { "grip_icon", table = "T", view = "" }, { "grip_name" } },
+    },
+  },
+<
+
 Neo-tree source keymaps:
   <CR>            Expand/collapse a table or group, open a folder's view in
                   the grid, or open a routine
