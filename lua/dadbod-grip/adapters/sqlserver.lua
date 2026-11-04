@@ -449,7 +449,7 @@ function M.ping(url)
   if vim.fn.executable("sqlcmd") == 0 then return false, "sqlcmd not found" end
   local parsed, parse_err = parse_url(url)
   if not parsed then return false, parse_err end
-  local stdout, stderr, code = sqlcmd(parsed, "SELECT 1", 5000)
+  local stdout, stderr, code = sqlcmd(parsed, "SELECT 1")
   if code == 0 then return true end
   return false, sqlcmd_error(stdout, stderr, code)
 end

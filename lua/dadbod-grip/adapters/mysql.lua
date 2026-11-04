@@ -514,7 +514,7 @@ function M.ping(url)
   if vim.fn.executable("mysql") == 0 then return false, "mysql not found" end
   local parsed, parse_err = parse_url(url)
   if not parsed then return false, parse_err end
-  local _, stderr, code = mysql_query(parsed, "SELECT 1", 5000)
+  local _, stderr, code = mysql_query(parsed, "SELECT 1")
   if code == 0 then return true end
   return false, stderr ~= "" and stderr or ("mysql exited with code " .. code)
 end
