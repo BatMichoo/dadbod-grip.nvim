@@ -318,13 +318,17 @@ end
 ---     error(err, 0) adds no position of its own, so nothing is hidden.
 ---
 --- Up to three values: the adapters' (result, err) contract, plus
---- get_table_keys's (pks, fks, err).
+--- get_table_keys's (pks, fks, err). A string in either of the later slots is the
+--- error; it goes through describe_error so a server that is down reads as one line
+--- instead of the client's multi-line account of every address it tried.
 local function via_adapter(url, fn, ...)
   local previous = adapters.set_call_readonly(
     require("dadbod-grip.connections").current_mode(url) == "ro")
   local ok, a, b, c = pcall(fn, ...)
   adapters.set_call_readonly(previous)
   if not ok then error(a, 0) end
+  if type(b) == "string" then b = adapters.describe_error(b) end
+  if type(c) == "string" then c = adapters.describe_error(c) end
   return a, b, c
 end
 
@@ -410,11 +414,11 @@ function M.execute(sql, url)
   return via_adapter(url, adapter.execute, sql, conn)
 end
 
---- Ping a connection. Returns true on success, false on any error.
+--- Ping a connection. Returns true on success, or false and the reason.
 --- File-backed adapters check filereadable(); network adapters run SELECT 1 (5s timeout).
 function M.ping(url)
-  local adapter, conn = resolve(url)
-  if not adapter then return false end
+  local adapter, conn, err = resolve(url)
+  if not adapter then return false, err end
   if adapter.ping then return via_adapter(url, adapter.ping, conn) end
   return false
 end

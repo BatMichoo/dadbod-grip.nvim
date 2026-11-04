@@ -1183,6 +1183,81 @@ test("mysql query: pins the client charset to utf8mb4", function()
   end)
 end)
 
+-- ── connection failures read as one line ─────────────────────────────────────
+-- The inputs are the clients' own output for a server that is down, copied
+-- from psql 17, mysql 8.0, go-sqlcmd and the ODBC sqlcmd.
+
+local describe = adapters.describe_error
+
+test("describe_error: psql connection refused on every address", function()
+  eq(describe('psql: error: connection to server at "localhost" (::1), port 5433 failed: Connection refused\n'
+    .. '\tIs the server running on that host and accepting TCP/IP connections?\n'
+    .. 'connection to server at "localhost" (127.0.0.1), port 5433 failed: Connection refused\n'
+    .. '\tIs the server running on that host and accepting TCP/IP connections?\n'),
+    "cannot reach localhost:5433 (connection refused). Is the server running?", "psql")
+end)
+
+test("describe_error: psql timeout, socket and unknown host", function()
+  eq(describe('psql: error: connection to server at "10.0.0.9", port 5432 failed: timeout expired\n'),
+    "cannot reach 10.0.0.9:5432 (timed out)", "timeout")
+  eq(describe('psql: error: connection to server on socket "/run/postgresql/.s.PGSQL.5432" failed: '
+    .. 'No such file or directory\n\tIs the server running locally and accepting connections on that socket?\n'),
+    "cannot reach /run/postgresql/.s.PGSQL.5432 (no server is listening there). Is the server running?",
+    "socket")
+  eq(describe('psql: error: could not translate host name "nosuchhost.invalid" to address: '
+    .. 'Name or service not known\n'), "unknown host nosuchhost.invalid", "unknown host")
+end)
+
+test("describe_error: mysql and mariadb", function()
+  eq(describe("ERROR 2003 (HY000): Can't connect to MySQL server on '127.0.0.1:5999' (111)\n"),
+    "cannot reach 127.0.0.1:5999 (connection refused). Is the server running?", "mysql refused")
+  eq(describe("ERROR 2002 (HY000): Can't connect to server on 'db' (115)\n"),
+    "cannot reach db (not reachable)", "mariadb, errno not recognised")
+  eq(describe("ERROR 2005 (HY000): Unknown MySQL server host 'nosuchhost.invalid' (-2)\n"),
+    "unknown host nosuchhost.invalid", "mysql unknown host")
+  eq(describe("ERROR 1045 (28000): Access denied for user 'root'@'172.18.0.1' (using password: YES)\n"),
+    "login failed for user root", "mysql login")
+  eq(describe("ERROR 1049 (42000): Unknown database 'nope'\n"),
+    "database nope does not exist", "mysql database")
+end)
+
+test("describe_error: go-sqlcmd and ODBC sqlcmd", function()
+  eq(describe("unable to open tcp connection with host '127.0.0.1:5999': "
+    .. "dial tcp 127.0.0.1:5999: connect: connection refused\n"),
+    "cannot reach 127.0.0.1:5999 (connection refused). Is the server running?", "go refused")
+  eq(describe("unable to open tcp connection with host '10.255.255.1:1433': "
+    .. "dial tcp 10.255.255.1:1433: i/o timeout\n"),
+    "cannot reach 10.255.255.1:1433 (timed out)", "go timeout")
+  eq(describe("lookup nosuchhost.invalid on 127.0.0.11:53: no such host\n"),
+    "unknown host nosuchhost.invalid", "go unknown host")
+  eq(describe("Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : Login timeout expired.\n"
+    .. "Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : TCP Provider: Error code 0x2749.\n"
+    .. "Sqlcmd: Error: Microsoft ODBC Driver 18 for SQL Server : A network-related or instance-specific "
+    .. "error has occurred while establishing a connection to 127.0.0.1,5999. Server is not found or "
+    .. "not accessible.\n"),
+    "cannot reach 127.0.0.1,5999 (timed out)", "odbc")
+  eq(describe("Msg 18456, Level 14, State 1, Server db, Line 1\nLogin failed for user 'sa'.\n"),
+    "login failed for user sa", "login")
+end)
+
+test("describe_error: other errors pass through unchanged", function()
+  local msg = 'ERROR:  relation "nope" does not exist\nLINE 1: SELECT * FROM nope\n'
+  eq(describe(msg), msg, "query error")
+  eq(describe(nil), nil, "nil")
+end)
+
+test("db.ping returns the condensed reason", function()
+  local orig = pg.ping
+  pg.ping = function()
+    return false, 'psql: error: connection to server at "h" (10.0.0.1), port 5432 failed: Connection refused\n'
+  end
+  local ok, reachable, err = pcall(require("dadbod-grip.db").ping, "postgresql://u@h/db")
+  pg.ping = orig
+  assert(ok, tostring(reachable))
+  eq(reachable, false, "unreachable")
+  eq(err, "cannot reach h:5432 (connection refused). Is the server running?", "reason")
+end)
+
 -- ── MySQL column types come from COLUMN_TYPE ─────────────────────────────────
 -- Rebuilding the type from DATA_TYPE + CHARACTER_MAXIMUM_LENGTH/NUMERIC_PRECISION
 -- renders enum(7), float(12) and longtext(4294967295) -- shaped like DDL, wrong.

@@ -710,6 +710,10 @@ local function with_switchable(initial_url, fn)
     package.loaded["dadbod-grip.query_pad"]  = { open = function() end }
     grip.open, grip.open_welcome = function() end, function() end
     vim.notify = function() end  -- with_connections restores the original
+    -- switch() pings a network server before connecting; these URLs are fake.
+    local db = require("dadbod-grip.db")
+    local orig_ping = db.ping
+    db.ping = function() return true end
     package.loaded["dadbod-grip.connections"] = nil
     local connections = require("dadbod-grip.connections")
 
@@ -720,6 +724,7 @@ local function with_switchable(initial_url, fn)
     package.loaded["dadbod-grip.query_pad"]   = saved.query_pad
     package.loaded["dadbod-grip.connections"] = saved.conns
     grip.open, grip.open_welcome = saved.open, saved.welcome
+    db.ping = orig_ping
     vim.fn.getcwd = orig_getcwd
     if not ok then error(err) end
   end)

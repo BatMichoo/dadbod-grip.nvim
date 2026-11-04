@@ -508,13 +508,15 @@ function M.execute(sql_str, url)
   return { affected = n, message = n .. " row(s) affected" }, nil
 end
 
---- Ping the server by running SELECT 1. Returns true on success, false on any error.
+--- Ping the server by running SELECT 1. Returns true on success, or false
+--- and the reason.
 function M.ping(url)
-  if vim.fn.executable("mysql") == 0 then return false end
-  local parsed = parse_url(url)
-  if not parsed then return false end
-  local _, _, code = mysql_query(parsed, "SELECT 1", 5000)
-  return code == 0
+  if vim.fn.executable("mysql") == 0 then return false, "mysql not found" end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return false, parse_err end
+  local _, stderr, code = mysql_query(parsed, "SELECT 1", 5000)
+  if code == 0 then return true end
+  return false, stderr ~= "" and stderr or ("mysql exited with code " .. code)
 end
 
 -- Exposed for testing

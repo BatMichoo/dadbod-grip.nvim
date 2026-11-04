@@ -89,6 +89,10 @@ local function with_real_file(fn)
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
   package.loaded["dadbod-grip.adapters.duckdb"] = { load_attachments = function() end }
   package.loaded["dadbod-grip.connections"] = nil
+  -- switch() pings a network server before connecting; these URLs are fake.
+  local db = require("dadbod-grip.db")
+  local orig_ping = db.ping
+  db.ping = function() return true end
   connections = require("dadbod-grip.connections")
 
   local local_grip = paths.grip_dir()
@@ -108,6 +112,7 @@ local function with_real_file(fn)
   package.loaded["dadbod-grip.adapters.duckdb"] = orig_duckdb
   package.loaded["dadbod-grip.connections"] = orig_connections
   connections = orig_connections
+  db.ping = orig_ping
 
   vim.fn.delete(project_dir, "rf")
   vim.fn.delete(fake_home, "rf")
@@ -158,6 +163,45 @@ test("switch: switching to an existing connection without a name still touches l
     eq(#data, 1, "still one entry")
     eq(data[1].name, "saved-name", "name preserved (no rename requested)")
     assert(data[1].last_used > 100, "last_used touched even without a name")
+  end)
+end)
+
+-- ── a server that cannot be reached ───────────────────────────────────────
+
+test("switch: an unreachable server aborts the switch with one error", function()
+  with_real_file(function(local_grip)
+    paths.ensure_dir(local_grip)
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "mydb", url = "postgresql://u:p@h/db", type = "postgresql", last_used = 100 },
+    }) }, local_grip .. "/connections.json")
+    vim.g.db = "sqlite:previous.db"
+    require("dadbod-grip.db").ping = function()
+      return false, "cannot reach h:5432 (connection refused). Is the server running?"
+    end
+    local messages = {}
+    vim.notify = function(msg, level) table.insert(messages, { msg = msg, level = level }) end
+
+    local committed = connections.switch("postgresql://u:p@h/db", "mydb", "postgresql", {})
+    flush_schedules()
+
+    eq(committed, false, "switch reports that it aborted")
+    eq(vim.g.db, "sqlite:previous.db", "the previous connection stays active")
+    eq(connections.get_health("postgresql://u:p@h/db"), "fail", "picker shows the failure")
+    eq(read_connections_json(local_grip)[1].last_used, 100, "connections.json untouched")
+    eq(#messages, 1, "one message, not one per failing window")
+    eq(messages[1].level, vim.log.levels.ERROR, "reported as an error")
+    eq(messages[1].msg,
+      "Grip: could not connect to mydb: cannot reach h:5432 (connection refused). Is the server running?",
+      "names the connection and the reason")
+  end)
+end)
+
+test("switch: file-backed connections are not pinged", function()
+  with_real_file(function()
+    local pinged = false
+    require("dadbod-grip.db").ping = function() pinged = true; return false, "x" end
+    connections.switch("sqlite:new.db", nil, nil, {})
+    eq(pinged, false, "sqlite creates a missing file, so a ping would refuse a valid URL")
   end)
 end)
 

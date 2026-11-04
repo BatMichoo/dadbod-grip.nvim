@@ -605,6 +605,26 @@ function M.switch(url, name, conn_type, opts)
     resolved_type = "file"
   end
 
+  -- Reach the server before anything is changed, the same way an unresolved
+  -- secret is caught above. Without this a server that was down still got
+  -- "connected to ...", with the real error buried among the sidebar's failed
+  -- table list and the query pad's sql FileType handlers (vim-dadbod-completion
+  -- among them) each failing on their own. Only the network adapters: sqlite
+  -- and duckdb create a missing file on first use, which a ping would refuse.
+  local kind = require("dadbod-grip.adapters").kind(conn_url)
+  if resolved_type ~= "file" and (kind == "postgresql" or kind == "mysql" or kind == "sqlserver") then
+    local label = name or require("dadbod-grip.sql").redact_url(url)
+    local reachable, ping_err = ui.blocking("connecting to " .. label .. "...", function()
+      return require("dadbod-grip.db").ping(url)
+    end)
+    if not reachable then
+      M.set_health(url, "fail")
+      vim.notify("Grip: could not connect to " .. label .. ": " .. (ping_err or "no response"),
+        vim.log.levels.ERROR)
+      return false
+    end
+  end
+
   -- Always upsert when a name is provided. This handles both insert (new
   -- URL) and rename (existing URL with a stale generic name like "vim.g.db").
   -- Without this, an already-saved URL would keep a stale name forever even
@@ -766,7 +786,7 @@ function M.switch(url, name, conn_type, opts)
     -- with nothing blocking between them -- so the float lifts on a finished
     -- layout. Built the other way round, each pane appeared empty and filled
     -- in a second later, which read as the plugin assembling itself on screen.
-    ui.blocking("connecting to " .. label .. "...", function()
+    ui.blocking("opening " .. label .. "...", function()
       if auto_sidebar or schema.is_open() then schema.prefetch(url) end
 
       if not schema.is_open() and auto_sidebar then

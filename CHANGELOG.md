@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Connecting to a PostgreSQL, MySQL/MariaDB or SQL Server database that is down now fails with one
+  message, such as `could not connect to dev: cannot reach localhost:5433 (connection refused). Is
+  the server running?`, and leaves the current connection active. It used to report the client's
+  multi-line error, then say `connected to dev` anyway and open a workspace whose query pad set off
+  more errors in other plugins (vim-dadbod-completion). The server is checked first, with a 5 second
+  timeout. Connection refused, timeouts, unknown hosts, failed logins and missing databases read as
+  one line wherever they appear.
 - MySQL/MariaDB: emoji and other multibyte text no longer come back as `?` when Neovim runs
   without a UTF-8 locale. The `mysql` client is now always told to use `utf8mb4` instead of
   picking a character set from the locale.

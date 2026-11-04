@@ -250,6 +250,10 @@ local function with_real_file(fn)
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
   package.loaded["dadbod-grip.connections"] = nil
+  -- switch() pings a network server before connecting; these URLs are fake.
+  local db = require("dadbod-grip.db")
+  local orig_ping = db.ping
+  db.ping = function() return true end
   connections = require("dadbod-grip.connections")
 
   local ok, err = pcall(fn, paths.grip_dir())
@@ -266,6 +270,7 @@ local function with_real_file(fn)
   package.loaded["dadbod-grip.query_pad"] = orig_query_pad
   package.loaded["dadbod-grip.connections"] = orig_connections
   connections = orig_connections
+  db.ping = orig_ping
   require("dadbod-grip.view").set_connection_accent(nil)
 
   vim.fn.delete(project_dir, "rf")

@@ -735,11 +735,13 @@ function M.execute(sql_str, url)
   return { affected = tonumber(n) or 0, message = stdout:gsub("%s+$", "") }, nil
 end
 
---- Ping the server by running SELECT 1. Returns true on success, false on any error.
+--- Ping the server by running SELECT 1. Returns true on success, or false
+--- and the reason.
 function M.ping(url)
-  if vim.fn.executable("psql") == 0 then return false end
-  local _, _, code = psql(url, "SELECT 1", 5000)
-  return code == 0
+  if vim.fn.executable("psql") == 0 then return false, "psql not found" end
+  local _, stderr, code = psql(url, "SELECT 1", 5000)
+  if code == 0 then return true end
+  return false, stderr ~= "" and stderr or ("psql exited with code " .. code)
 end
 
 M._psql_args = psql_args

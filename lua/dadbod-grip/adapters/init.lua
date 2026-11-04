@@ -197,6 +197,88 @@ function M.kind(url)
   return nil
 end
 
+-- ── connection failures ──────────────────────────────────────────────────
+-- Every client words "could not connect" differently, and psql spends four
+-- lines on it (one per address it tried, each with a hint). describe_error
+-- turns the common failures into one line that names what was tried and why
+-- it failed. Anything it does not recognise is passed through untouched.
+
+--- Where the client was trying to connect, by client.
+local TARGETS = {
+  'connection to server at "([^"]+)"[^,]*, port (%d+) failed',  -- psql 14+
+  'connection to server on socket "([^"]+)" failed',            -- psql 14+
+  'on host "([^"]+)".-on port (%d+)',                           -- psql < 14
+  "Can't connect to [%w ]*server on '([^']+)'",                 -- mysql, mariadb
+  "Can't connect to local [%w ]*server through socket '([^']+)'",
+  "unable to open tcp connection with host '([^']+)'",          -- go-sqlcmd
+  "while establishing a connection to (.-)%. Server is not found", -- ODBC sqlcmd
+}
+
+--- Why the connection failed, in the order they are tried. The bare numbers
+--- are the errno mysql and mariadb print, the hex ones ODBC's Winsock codes.
+local REASONS = {
+  { "[Cc]onnection refused", "connection refused" },
+  { "%(111%)", "connection refused" },
+  { "0x274D", "connection refused" },
+  { "No such file or directory", "no server is listening there" },
+  { "%(2%)", "no server is listening there" },
+  { "[Tt]ime[d ]*out", "timed out" },
+  { "%(110%)", "timed out" },
+  { "0x2749", "timed out" },
+}
+
+local UNKNOWN_HOST = {
+  'could not translate host name "([^"]+)" to address',  -- psql
+  "Unknown [%w ]*server host '([^']+)'",                 -- mysql, mariadb
+  "lookup ([^%s:]+).-no such host",                      -- go-sqlcmd
+}
+
+local LOGIN_FAILED = {
+  'password authentication failed for user "([^"]+)"',  -- psql
+  "Access denied for user '([^']*)'",                   -- mysql, mariadb
+  "Login failed for user '([^']*)'",                    -- sqlcmd
+}
+
+local UNKNOWN_DATABASE = {
+  'database "([^"]+)" does not exist',                     -- psql
+  "Unknown database '([^']+)'",                            -- mysql, mariadb
+  'Cannot open database "([^"]+)" requested by the login', -- sqlcmd
+}
+
+local function first_match(patterns, msg)
+  for _, pattern in ipairs(patterns) do
+    local a, b = msg:match(pattern)
+    if a then return a, b end
+  end
+end
+
+--- One-line summary of a client's "could not connect" error, or `msg`
+--- unchanged when it is some other error.
+--- @param msg string
+--- @return string
+function M.describe_error(msg)
+  if type(msg) ~= "string" then return msg end
+  local host, port = first_match(TARGETS, msg)
+  if host then
+    local where = port and (host .. ":" .. port) or host
+    local reason
+    for _, r in ipairs(REASONS) do
+      if msg:find(r[1]) then reason = r[2]; break end
+    end
+    if reason == "connection refused" or reason == "no server is listening there" then
+      return string.format("cannot reach %s (%s). Is the server running?", where, reason)
+    end
+    return string.format("cannot reach %s (%s)", where, reason or "not reachable")
+  end
+  local name = first_match(UNKNOWN_HOST, msg)
+  if name then return "unknown host " .. name end
+  local user = first_match(LOGIN_FAILED, msg)
+  if user then return "login failed for user " .. user end
+  local database = first_match(UNKNOWN_DATABASE, msg)
+  if database then return "database " .. database .. " does not exist" end
+  return msg
+end
+
 --- Human-readable adapter name for a connection URL ("PostgreSQL", ...).
 --- @param url string|nil
 --- @return string|nil  nil when the scheme is unknown
