@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The schema browser can be shown as a neo-tree.nvim source. Add `"dadbod-grip.neo_tree"` to
+  neo-tree's `sources` and set `sidebar = "neo-tree"`, and grip opens neo-tree wherever it opened
+  its own sidebar; `:Neotree grip` works too. It lists the same schemas, tables, views, routines,
+  table folders and partitions, and shares the sidebar's cache. `<CR>`, `s`, `S`, `R` and `y` work
+  as in the sidebar; search, drop, create and attach are not available there yet.
+  See `:h grip-neo-tree`.
 - SQL Server: connections are pooled. One sqlcmd process stays open per connection, so repeated
   queries skip the login and TLS handshake, which makes Azure SQL with Entra ID much faster. `#temp`
   tables and `SET` options now persist between submissions while the session lives; open

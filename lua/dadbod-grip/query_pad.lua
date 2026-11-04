@@ -488,7 +488,7 @@ function M.open(url, opts)
       for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
         local wbuf = vim.api.nvim_win_get_buf(winid)
         local ft = vim.bo[wbuf].filetype
-        if ft ~= "grip_schema" then
+        if not schema.is_sidebar_filetype(ft) then
           target_win = winid
           break
         end

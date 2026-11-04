@@ -200,5 +200,61 @@ test("explicitly blank schema metadata stays unknown even with a proven adapter 
   assert(find(schema._build_nodes(st),"table","implicit_main"))
 end)
 
+-- ── nested(): the whole catalog for a tree view with its own fold state ────
+
+local tree = require("dadbod-grip.schema_tree")
+local function child(node, kind, name)
+  for _, c in ipairs(node.children or {}) do
+    if c.kind == kind and c.name == name then return c end
+  end
+  error("no " .. kind .. " " .. name .. " under " .. tostring(node.name))
+end
+
+test("nested: schemas hold categories, objects and table folders", function()
+  local st = state({{name="analytics.events",type="table",schema="analytics"},
+    {name="analytics.recent",type="view",schema="analytics"},
+    {name="public.users",type="table",schema="public"}}, {
+    {name="analytics.calc",display="analytics.calc(value integer)",type="function",schema="analytics",source_id="11"},
+  })
+  local roots = tree.nested(st)
+  assert(#roots == 2, "one root per schema, got " .. #roots)
+  local analytics = assert(roots[1].kind == "schema" and roots[1].name == "analytics" and roots[1])
+  local tables = child(analytics, "header", "Tables (1)")
+  child(analytics, "header", "Views (1)")
+  local fn = child(child(analytics, "header", "Functions (1)"), "routine", "analytics.calc(value integer)")
+  assert(fn.routine == "analytics.calc" and fn.source_id == "11", "routine keeps what opens its source")
+  local events = child(tables, "table", "analytics.events")
+  assert(events.table_name == "analytics.events")
+  local folders = vim.tbl_map(function(c) return c.name end, events.children)
+  assert(vim.deep_equal(folders, {"Columns", "Keys", "Constraints", "Indexes"}), vim.inspect(folders))
+end)
+
+test("nested: a single unnamed schema puts the categories at the root", function()
+  local roots = tree.nested(state({{name="users",type="table"}}))
+  assert(#roots == 1 and roots[1].kind == "header" and roots[1].name == "Tables (1)", vim.inspect(roots))
+end)
+
+test("nested: a folder has children only once its metadata is cached", function()
+  local st = state({{name="users",type="table"}})
+  local columns = child(child(tree.nested(st)[1], "table", "users"), "facet", "Columns")
+  assert(columns.children == nil, "unfetched folder must stay unloaded")
+  assert(columns.table_id and columns.view == "columns", "folder carries what loading it needs")
+  st.col_cache.users = {{column_name="id", data_type="integer"}, {column_name="email", data_type="text"}}
+  st.pk_cache.users, st.fk_cache.users = {id = true}, {}
+  columns = child(child(tree.nested(st)[1], "table", "users"), "facet", "Columns (2)")
+  assert(#columns.children == 2 and columns.children[1].kind == "column", vim.inspect(columns.children))
+  assert(columns.children[1].name == "id" and columns.children[1].pk == true, "PK marker from the key cache")
+  assert(columns.children[1].id ~= columns.children[2].id, "column ids are unique")
+end)
+
+test("nested: partitions nest under their parent table", function()
+  local roots = tree.nested(state(relations()))
+  assert(#roots == 1 and roots[1].name == "metrics", "partitions are not roots of their own schema")
+  local events = child(child(roots[1], "header", "Tables (1)"), "table", "metrics.events")
+  local parts = child(events, "partitions", "Partitions (1)")
+  local p2026 = child(parts, "table", "metrics.events_2026")
+  child(child(p2026, "partitions", "Partitions (1)"), "table", "archive.events_2026_08_17")
+end)
+
 print(string.format("schema_tree_spec: %d passed, %d failed",pass,fail))
 if fail>0 then os.exit(1) end

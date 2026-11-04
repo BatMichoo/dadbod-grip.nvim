@@ -36,14 +36,7 @@ function M.setup(url, ctx)
     elseif node.is_file then
       if node.kind == "table" then
         -- File table node: focus grid if open, otherwise open the file
-        local view_mod = require("dadbod-grip.view")
-        local content_win = view_mod.find_content_win()
-        local content_buf = content_win and vim.api.nvim_win_get_buf(content_win)
-        if content_win and view_mod._sessions[content_buf] then
-          vim.api.nvim_set_current_win(content_win)
-        else
-          require("dadbod-grip").open(url, nil, {})
-        end
+        ctx.open_file(url)
       else
         -- File column node: collapse/expand parent
         state.expanded["__file__"] = not state.expanded["__file__"]

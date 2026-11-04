@@ -42,13 +42,14 @@ function M.open_welcome()
   -- the welcome screen in. Query pad and grid replace their own window.
   local cur_buf = vim.api.nvim_get_current_buf()
   local cur_ft  = vim.bo[cur_buf].filetype
-  local is_special = cur_ft == "grip_schema"
+  local is_sidebar = require("dadbod-grip.schema").is_sidebar_filetype
+  local is_special = is_sidebar(cur_ft)
   if is_special then
     for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       local wbuf  = vim.api.nvim_win_get_buf(winid)
       local wname = vim.api.nvim_buf_get_name(wbuf)
       local wft   = vim.bo[wbuf].filetype
-      if wft ~= "grip_schema"
+      if not is_sidebar(wft)
           and not (wname:match("^grip://") and wname ~= "grip://welcome") then
         vim.api.nvim_set_current_win(winid)
         break

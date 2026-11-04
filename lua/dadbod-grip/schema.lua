@@ -9,6 +9,22 @@ local esc     = require("dadbod-grip.sql").escape_literal
 
 local M = {}
 
+--- The neo-tree source, when setup({ sidebar = "neo-tree" }) asks for it and
+--- neo-tree has it registered; nil means the built-in sidebar. Every public
+--- sidebar function below asks this first, so callers never need to know
+--- which tree is on screen.
+local function neo_tree()
+  if require("dadbod-grip.config").values.sidebar ~= "neo-tree" then return nil end
+  local source = require("dadbod-grip.neo_tree")
+  if source.available() then return source end
+  if not M._warned_neo_tree then
+    M._warned_neo_tree = true
+    vim.notify('Grip: sidebar = "neo-tree" needs neo-tree.nvim with "dadbod-grip.neo_tree" in its'
+      .. " sources; using the built-in sidebar", vim.log.levels.WARN)
+  end
+  return nil
+end
+
 local _ag = vim.api.nvim_create_augroup("DadbodGripSchema", { clear = true })
 
 -- Active schema state (one per connection URL)
@@ -268,6 +284,15 @@ local function restore_selection(state, anchor)
   vim.api.nvim_win_call(_sidebar_winid, function() vim.fn.winrestview(view) end)
 end
 
+--- The sidebar's heading: the file name, or the connection's name.
+function M.title(state)
+  if state.file_cols ~= nil then
+    return state.url:match("[^/\\]+$") or state.url
+  end
+  local current = require("dadbod-grip.connections").current()
+  return current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
+end
+
 --- Render complete buffer labels; the window viewport handles horizontal clipping.
 local function render(state, anchor)
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
@@ -278,14 +303,7 @@ local function render(state, anchor)
     lines[#lines + 1] = text
     if hl then highlights[#highlights + 1] = {line = #lines - 1, col = 0, end_col = #text, hl = hl} end
   end
-  local title
-  if state.file_cols ~= nil then
-    title = state.url:match("[^/\\]+$") or state.url
-  else
-    local current = require("dadbod-grip.connections").current()
-    title = current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
-  end
-  line(" " .. title, "GripConnAccentBold")
+  line(" " .. M.title(state), "GripConnAccentBold")
   line("")
   if state.filter then line(" / " .. state.filter, "Search"); line("") end
   local widths = {}
@@ -430,6 +448,18 @@ local function open_routine_source(routine_name, url)
   vim.api.nvim_win_set_buf(target_win, bufnr)
 end
 
+--- Focus the grid already showing a file connection, or open the file.
+local function open_file(url)
+  local view_mod = require("dadbod-grip.view")
+  local content_win = view_mod.find_content_win()
+  local content_buf = content_win and vim.api.nvim_win_get_buf(content_win)
+  if content_win and view_mod._sessions[content_buf] then
+    vim.api.nvim_set_current_win(content_win)
+  else
+    require("dadbod-grip").open(url, nil, {})
+  end
+end
+
 --- Line number offset for node list (title + blank [+ filter + blank]).
 local function node_offset(state)
   return state.filter and 4 or 2
@@ -474,6 +504,7 @@ local keymap_ctx = {
   jump_to_next_table = jump_to_next_table,
   node_at_cursor = node_at_cursor,
   node_offset = node_offset,
+  open_file = open_file,
   open_routine_source = open_routine_source,
   open_table = open_table,
   open_table_split = open_table_split,
@@ -536,6 +567,12 @@ end
 -- From outside the sidebar: focus it (open if needed).
 -- From inside the sidebar: close it.
 function M.toggle(url)
+  local source = neo_tree()
+  if source then
+    url = url or db.get_url()
+    if url then M.prefetch(url) end
+    return source.toggle(url)
+  end
   if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
     if vim.api.nvim_get_current_win() == _sidebar_winid then
       -- Already in sidebar → close (toggle off)
@@ -598,6 +635,8 @@ end
 
 --- Close the schema sidebar.
 function M.close()
+  local source = neo_tree()
+  if source then return source.close() end
   if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
     _sidebar_saved_width = vim.api.nvim_win_get_width(_sidebar_winid)
     vim.api.nvim_win_close(_sidebar_winid, true)
@@ -606,10 +645,14 @@ function M.close()
 end
 
 function M.is_open()
+  local source = neo_tree()
+  if source then return source.winid() ~= nil end
   return _sidebar_winid ~= nil and vim.api.nvim_win_is_valid(_sidebar_winid)
 end
 
 function M.get_winid()
+  local source = neo_tree()
+  if source then return source.winid() end
   if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
     return _sidebar_winid
   end
@@ -621,15 +664,34 @@ function M.get_right_win()
   if not M.is_open() then return nil end
   for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local bufnr = vim.api.nvim_win_get_buf(winid)
-    if bufnr ~= _sidebar_bufnr then
+    if not M.is_sidebar_filetype(vim.bo[bufnr].filetype) then
       return winid
     end
   end
   return nil
 end
 
+--- Whether a window showing this filetype is a schema sidebar, built-in or
+--- neo-tree's. Grids, the query pad and the welcome screen never go there.
+function M.is_sidebar_filetype(ft)
+  return ft == "grip_schema" or ft == "neo-tree"
+end
+
 --- Expose per-URL state for use by er_diagram.lua (read-only; do not mutate).
 M.get_state = get_state
+
+-- For the neo-tree source, which draws the same catalog in its own window.
+M.abbrev_type = abbrev_type
+M.open_file = open_file
+M.open_routine_source = open_routine_source
+M.open_table = open_table
+M.open_table_split = open_table_split
+M.open_table_view = open_table_view
+
+--- Fetch what one folder under a table lists, unless it is cached.
+function M.load_facet(url, table_name, facet)
+  return FACET_LOADERS[facet](get_state(url), table_name)
+end
 
 --- Exposed for testing only.
 --- Test hook: forget every cached schema so a spec can watch a fresh fetch.
@@ -643,15 +705,22 @@ M._sidebar_width_for = sidebar_width_for
 M._build_nodes = build_nodes
 
 --- Refresh sidebar if visible (e.g., after connection switch).
-function M.refresh(url)
-  if not url then return end
+--- Forget everything cached for `url`, so the next prefetch fetches again.
+function M.invalidate(url)
   local state = get_state(url)
-  -- Invalidate all caches so fresh data is fetched
   state.items = nil
   state.routines = nil
   state.file_cols = nil
   clear_metadata(state)
   db.clear_key_cache(url)
+  return state
+end
+
+function M.refresh(url)
+  if not url then return end
+  local state = M.invalidate(url)
+  local source = neo_tree()
+  if source then return source.refresh(url) end
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   if is_file_url(url) then

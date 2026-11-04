@@ -124,6 +124,7 @@ Override if needed: >lua
     cell_split       = "horizontal",
     sticky_header    = true,
     open_sidebar     = true,
+    sidebar          = "grip",
   })
 <
 When `connections_path` is set, grip reads and writes connections to that single
@@ -136,6 +137,9 @@ Health pings use 5 seconds.
 
 Set `open_sidebar = false` to connect directly into the main workspace. The
 sidebar remains available through :GripSchema, `gb`, or `1`.
+
+Set `sidebar = "neo-tree"` to show the schema in neo-tree instead of grip's
+own sidebar. See |grip-neo-tree|.
 
                                                              *grip-picker*
 When `picker` is set to "telescope" or "snacks", simple pickers (table picker,
@@ -915,6 +919,42 @@ The window edge indicates clipped text. Columns load when the Columns folder
 is opened and show type abbreviations (int, text, bool, vc(255), etc.), with
 primary- and foreign-key markers once the Keys folder has loaded the keys.
 
+Neo-tree ~
+                                                              *grip-neo-tree*
+The schema can be shown as a neo-tree.nvim source instead of in grip's own
+sidebar. Register the source with neo-tree and tell grip to use it: >lua
+
+  require("neo-tree").setup({
+    sources = { "filesystem", "buffers", "git_status", "dadbod-grip.neo_tree" },
+  })
+  require("dadbod-grip").setup({ sidebar = "neo-tree" })
+<
+Grip then opens the neo-tree window wherever it would open its sidebar: on
+connect, with :GripSchema, and with `gb` or `1`. `:Neotree grip` opens it by
+hand, and the source can be added to neo-tree's source selector. If neo-tree
+is missing or the source is not registered, grip warns once and keeps its own
+sidebar.
+
+The tree is the same catalog: schemas, the Tables, Views, Functions and
+Procedures categories, and under each table its folders and partitions. It
+shares the sidebar's cache, so a folder fetched in one is not fetched again in
+the other. Folds are neo-tree's own.
+
+Neo-tree source keymaps:
+  <CR>            Expand/collapse a table or group, open a folder's view in
+                  the grid, or open a routine
+  <Space>         Expand/collapse, loading a folder the first time
+  s               Open the table's records (from the table, a folder, or
+                  an item)
+  S               Open the table's records in a new split
+  R               Refresh the schema, keeping open folders open
+  y               Yank table, column or routine name to clipboard
+  C / z           Close the node / close every node (neo-tree's)
+  ?               neo-tree's mapping help
+
+Neo-tree's file operations are disabled in this source. The other built-in
+sidebar keymaps (search, drop, create, attach) are not available here yet.
+
 ==============================================================================
 11. QUERY PAD                                             *grip-query-pad*
 
@@ -1415,6 +1455,9 @@ grip.setup({opts})
     sticky_header (boolean) Column names in the winbar. Default: true
                             See |grip-sticky-header|
     open_sidebar  (boolean) Open schema sidebar on connect. Default: true
+    sidebar       (string)  "grip" for the built-in schema sidebar,
+                            "neo-tree" for the neo-tree source.
+                            Default: "grip". See |grip-neo-tree|
     databases     (table)   Connections and groups. See |grip-databases|
     sqlserver_max_type_width (number|nil)
                             Characters sqlcmd returns for varchar(max),

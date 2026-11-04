@@ -129,6 +129,83 @@ local function facet_items(state, table_name, facet)
   return out
 end
 
+-- ── nested projection ────────────────────────────────────────────────────
+-- build() flattens the tree through the sidebar's own fold state. A tree view
+-- that keeps its fold state itself (the neo-tree source) wants the whole
+-- catalog nested instead, with no state of ours deciding what is open.
+
+--- Whether the metadata one table folder lists has been fetched.
+local FACET_CACHES = {columns = "col_cache", keys = "pk_cache", constraints = "constraint_cache",
+  indexes = "index_cache"}
+
+--- One folder under a table. `children` is nil until the folder's metadata is
+--- cached; the caller loads it on expand and asks again.
+function M.facet_node(state, table_id, table_name, facet)
+  local fid = table_id .. "\0facet\0" .. facet.key
+  local node = {kind = "facet", id = fid, name = facet.title, facet = facet.key, view = facet.view,
+    table_name = table_name, table_id = table_id}
+  if not (state[FACET_CACHES[facet.key]] or {})[table_name] then return node end
+  node.children = {}
+  for _, entry in ipairs(facet_items(state, table_name, facet.key)) do
+    entry.id = fid .. "\0" .. entry.key
+    entry.table_name, entry.facet, entry.view = table_name, facet.key, facet.view
+    entry.name = entry.kind == "facet_item" and entry.text or entry.name
+    node.children[#node.children + 1] = entry
+  end
+  if facet.key == "columns" then node.name = facet.title .. " (" .. #node.children .. ")" end
+  return node
+end
+
+--- The catalog as nested nodes: schemas (when there is more than one), then
+--- the Tables/Views/Functions/Procedures categories, their objects, and under
+--- each table its folders and partitions. Node fields match build()'s.
+function M.nested(state)
+  local ix, roots = index(state), {}
+  local function object_node(object)
+    local item, id = object.item, object.id
+    if object.kind == "routine" then
+      return {kind = "routine", id = id, name = item.display or item.name, routine = item.name,
+        type = item.type, source_id = item.source_id}
+    end
+    local label = item.name
+    local actual_parent = ix.by_id[ix.parent[id]]
+    if object.schema and actual_parent and actual_parent.schema ~= object.schema and item.relation_name then
+      label = object.schema .. "." .. item.relation_name
+    end
+    local children = {}
+    for _, facet in ipairs(M.FACETS) do
+      children[#children + 1] = M.facet_node(state, id, item.name, facet)
+    end
+    local parts = ix.children[id]
+    if parts then
+      local group = {kind = "partitions", id = partition_id(id), name = "Partitions (" .. #parts .. ")",
+        table_name = item.name, children = {}}
+      for _, child in ipairs(parts) do group.children[#group.children + 1] = object_node(child) end
+      children[#children + 1] = group
+    end
+    return {kind = "table", id = id, name = label, table_name = item.name, type = item.type,
+      relation_kind = item.relation_kind, children = children}
+  end
+  for _, s in ipairs(ix.schema_order) do
+    local categories = {}
+    for _, kind in ipairs(CATEGORIES) do
+      local objects = ix.schemas[s][kind]
+      if #objects > 0 then
+        local category = {kind = "header", id = "header\0" .. s .. "\0" .. kind,
+          name = TITLES[kind] .. " (" .. #objects .. ")", children = {}}
+        for _, object in ipairs(objects) do category.children[#category.children + 1] = object_node(object) end
+        categories[#categories + 1] = category
+      end
+    end
+    if s ~= "" then
+      roots[#roots + 1] = {kind = "schema", id = schema_id(s), name = s, schema = s, children = categories}
+    else
+      vim.list_extend(roots, categories)
+    end
+  end
+  return roots
+end
+
 function M.build(state)
   local ix, nodes = index(state), {}
   local filtering = state.filter and state.filter ~= ""

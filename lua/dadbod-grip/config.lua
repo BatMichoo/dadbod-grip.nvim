@@ -29,6 +29,9 @@ local OPTS = {
   -- visible when a long table scrolls past it. Costs one screen line.
   sticky_header = true,
   open_sidebar = true,
+  -- "grip" for the built-in schema sidebar, "neo-tree" to show the schema as
+  -- a neo-tree source instead (see :h grip-neo-tree).
+  sidebar = "grip",
 }
 
 --- Live option table. Read-only for callers outside this module; use get()
@@ -77,6 +80,9 @@ function M.apply(opts)
     discovery     = { opts.discovery, "boolean", true },
     sticky_header = { opts.sticky_header, "boolean", true },
     open_sidebar  = { opts.open_sidebar,  "boolean", true },
+    sidebar       = { opts.sidebar, function(v)
+      return v == nil or v == "grip" or v == "neo-tree"
+    end, '"grip" or "neo-tree"' },
     databases     = { opts.databases,     "table",   true },
     sqlserver_max_type_width = { opts.sqlserver_max_type_width, function(v)
       return v == nil or (type(v) == "number" and v >= 0 and v <= 8000 and v % 1 == 0)
@@ -95,6 +101,7 @@ function M.apply(opts)
   if opts.discovery ~= nil then OPTS.discovery = opts.discovery end
   if opts.sticky_header ~= nil then OPTS.sticky_header = opts.sticky_header end
   OPTS.open_sidebar = opts.open_sidebar ~= false
+  OPTS.sidebar = opts.sidebar or "grip"
   OPTS.databases = opts.databases
   OPTS.sqlserver_max_type_width = opts.sqlserver_max_type_width
 

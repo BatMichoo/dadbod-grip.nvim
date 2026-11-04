@@ -556,6 +556,7 @@ end
 ---@field border? string|table   Float window border style (default: "rounded")
 ---@field cell_split? string     Cell buffer (gB) split style: "horizontal"|"vertical"
 ---@field open_sidebar? boolean  Open the schema sidebar on connection (default: true)
+---@field sidebar? "grip"|"neo-tree"  Schema sidebar to use (default: "grip")
 ---@field databases? table       Connections as { servers = { KEY = host }, definitions = { ... } }
 
 ---Setup dadbod-grip with user options.

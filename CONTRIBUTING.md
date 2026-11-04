@@ -33,6 +33,11 @@ Use `NVIM=/path/to/nvim just test` for a specific supported Neovim. For an
 already-running database, set `GRIP_TEST_LIVE_URL` and run `just test-live
 postgresql-16`, `mysql-8.4`, `mariadb-11.8`, `sqlserver-2025`, or `sqlite`.
 
+`tests/spec/neo_tree_spec.lua` drives a real neo-tree.nvim. It looks for
+`neo-tree.nvim`, `nui.nvim` and `plenary.nvim` side by side in
+`GRIP_NEO_TREE_DIR` (default: lazy.nvim's `~/.local/share/nvim/lazy`) and
+skips when they are missing; CI pins all three.
+
 Run `just e2e-visual` when a change can affect window creation, sidebar sizing, the query pad, grid rendering, or resize behavior. It opens a real tmux-backed Neovim UI at 100, 80, and 160 columns.
 
 Live PostgreSQL, MySQL, MariaDB, and SQL Server jobs run in GitHub Actions.

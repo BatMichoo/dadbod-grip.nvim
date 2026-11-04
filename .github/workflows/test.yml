@@ -69,9 +69,22 @@ jobs:
             sleep 5
           done
           exit 1
+      - name: Fetch pinned neo-tree.nvim and its dependencies
+        run: |
+          dir="$RUNNER_TEMP/neo-tree"
+          fetch() {
+            git init -q "$dir/$1"
+            git -C "$dir/$1" fetch -q --depth 1 "https://github.com/$2.git" "$3"
+            git -C "$dir/$1" checkout -q FETCH_HEAD
+          }
+          fetch neo-tree.nvim nvim-neo-tree/neo-tree.nvim f3f3bf73414e400cf9fc13fda50f00404a8f8ab1 # 3.42.0
+          fetch nui.nvim MunifTanjim/nui.nvim 10fc361835c856ba4233ef5ea135b919bf3dce97
+          fetch plenary.nvim nvim-lua/plenary.nvim 74b06c6c75e4eeb3108ec01852001636d85a932b
+          echo "GRIP_NEO_TREE_DIR=$dir" >> "$GITHUB_ENV"
       - name: Run deterministic suite through the documented entry point
         env:
           GRIP_REQUIRE_DUCKDB: "1"
+          GRIP_REQUIRE_NEO_TREE: "1"
         run: just test
 
   live:
