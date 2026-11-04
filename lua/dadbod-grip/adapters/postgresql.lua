@@ -739,7 +739,7 @@ end
 --- and the reason.
 function M.ping(url)
   if vim.fn.executable("psql") == 0 then return false, "psql not found" end
-  local _, stderr, code = psql(url, "SELECT 1", 5000)
+  local _, stderr, code = psql(url, "SELECT 1")
   if code == 0 then return true end
   return false, stderr ~= "" and stderr or ("psql exited with code " .. code)
 end
