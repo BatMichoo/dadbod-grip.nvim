@@ -244,7 +244,7 @@ end
 local function setup_keymaps(bufnr, url)
   -- Always read the live connection from the buffer variable so keymaps stay
   -- correct after gC / gq / any other path that switches the connection.
-  local function cur_url() return vim.b[bufnr].db or vim.g.db or url end
+  local function cur_url() return vim.b[bufnr].db or require("dadbod-grip.db").active_url() or url end
 
   local km = require("dadbod-grip.keymaps")
   local function kmap(action, mode, fn, opts)
@@ -609,7 +609,7 @@ function M.pick_notebook()
     on_select = function(f)
       -- Ensure the pad is open and visible
       local db_url = vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db
-        or vim.g.db
+        or require("dadbod-grip.db").active_url()
         or require("dadbod-grip.db").get_url()
       if db_url then M.open(db_url) end
       vim.schedule(function()

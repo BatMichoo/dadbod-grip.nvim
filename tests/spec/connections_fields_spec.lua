@@ -50,6 +50,9 @@ local function with_real_file(fn)
   local orig_expand = vim.fn.expand
   local orig_notify = vim.notify
   local orig_g_db = vim.g.db
+  -- switch() sets the tab's t:db, which outranks g:db: start each case clean.
+  local orig_t_db = vim.t.db
+  vim.t.db = nil
   local orig_opts = grip.get_opts()
   local orig_open = grip.open
   local orig_open_welcome = grip.open_welcome
@@ -88,6 +91,7 @@ local function with_real_file(fn)
   vim.fn.expand = orig_expand
   vim.notify = orig_notify
   vim.g.db = orig_g_db
+  vim.t.db = orig_t_db
   grip.setup(orig_opts)
   grip.open = orig_open
   grip.open_welcome = orig_open_welcome

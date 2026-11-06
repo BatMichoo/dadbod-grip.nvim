@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Connecting sets the current tab's `t:db` instead of the global `g:db`, so the connection
+  stays in the tab grip runs in. SQL buffers in other tabs no longer inherit it, and
+  vim-dadbod-completion stops connecting to grip's database from unrelated `.sql` files. A
+  `g:db` you set yourself is still read as a fallback. See `:h grip-active-connection`.
 - Neovim 0.12+: loading a table, profile, ER diagram or connection reports a native progress
   message (`nvim_echo` with `kind = "progress"`) instead of the centered spinner float, so it
   appears wherever messages are shown (the cmdline, ui2, `vim.ui.progress_status()` in a

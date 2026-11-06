@@ -93,7 +93,7 @@ local function apply_metadata(content)
   if connection_id then
     local conn, reason = connections.find_by_id(connection_id)
     if conn then
-      if conn.url == vim.g.db or connections.switch(conn.url, nil, conn.type) then
+      if conn.url == require("dadbod-grip.db").active_url() or connections.switch(conn.url, nil, conn.type) then
         bound_url = conn.url
       end
     elseif reason == "ambiguous" then
@@ -109,7 +109,7 @@ local function apply_metadata(content)
         "Grip: legacy saved query contains credentials; it was not auto-connected. Resave it to remove them.",
         vim.log.levels.WARN)
     else
-      if legacy_url == vim.g.db or connections.switch(legacy_url, nil) then
+      if legacy_url == require("dadbod-grip.db").active_url() or connections.switch(legacy_url, nil) then
         bound_url = legacy_url
       end
       vim.notify("Grip: legacy saved-query metadata will migrate when you next save it",
@@ -154,7 +154,7 @@ function M.save_prompt(bufnr)
     local name = ui.input({ prompt = "Save query as: " })
     if not name then return end
     -- Prefer buffer-local db (set by DBUI), then global
-    local url = vim.b[bufnr].db or vim.g.db or ""
+    local url = vim.b[bufnr].db or require("dadbod-grip.db").active_url() or ""
     M.save(name, content, url)
     vim.bo[bufnr].modified = false
   end)

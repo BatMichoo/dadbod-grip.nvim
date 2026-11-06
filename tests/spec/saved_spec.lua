@@ -39,6 +39,9 @@ local function with_storage(fn, opts)
   local expand = vim.fn.expand
   local notify = vim.notify
   local current_db = vim.g.db
+  -- switch() sets the tab's t:db, which outranks g:db: start each case clean.
+  local orig_t_db = vim.t.db
+  vim.t.db = nil
   local old_opts = grip.get_opts()
   local notices = {}
 
@@ -62,6 +65,7 @@ local function with_storage(fn, opts)
   vim.fn.expand = expand
   vim.notify = notify
   vim.g.db = current_db
+  vim.t.db = orig_t_db
   grip.setup(old_opts)
   vim.fn.delete(root, "rf")
   vim.fn.delete(fake_home, "rf")

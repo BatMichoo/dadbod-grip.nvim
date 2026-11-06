@@ -60,6 +60,9 @@ local function with_real_file(fn)
   local orig_expand = vim.fn.expand
   local orig_notify = vim.notify
   local orig_g_db = vim.g.db
+  -- switch() sets the tab's t:db, which outranks g:db: start each case clean.
+  local orig_t_db = vim.t.db
+  vim.t.db = nil
   local orig_opts = grip.get_opts()
   local orig_open = grip.open
   local orig_open_welcome = grip.open_welcome
@@ -104,6 +107,7 @@ local function with_real_file(fn)
   vim.fn.expand = orig_expand
   vim.notify = orig_notify
   vim.g.db = orig_g_db
+  vim.t.db = orig_t_db
   grip.setup(orig_opts)
   grip.open = orig_open
   grip.open_welcome = orig_open_welcome
@@ -174,7 +178,7 @@ test("switch: an unreachable server aborts the switch with one error", function(
     vim.fn.writefile({ vim.fn.json_encode({
       { name = "mydb", url = "postgresql://u:p@h/db", type = "postgresql", last_used = 100 },
     }) }, local_grip .. "/connections.json")
-    vim.g.db = "sqlite:previous.db"
+    vim.t.db = "sqlite:previous.db"
     require("dadbod-grip.db").ping = function()
       return false, "cannot reach h:5432 (connection refused). Is the server running?"
     end
@@ -185,7 +189,7 @@ test("switch: an unreachable server aborts the switch with one error", function(
     flush_schedules()
 
     eq(committed, false, "switch reports that it aborted")
-    eq(vim.g.db, "sqlite:previous.db", "the previous connection stays active")
+    eq(vim.t.db, "sqlite:previous.db", "the previous connection stays active")
     eq(connections.get_health("postgresql://u:p@h/db"), "fail", "picker shows the failure")
     eq(read_connections_json(local_grip)[1].last_used, 100, "connections.json untouched")
     eq(#messages, 1, "one message, not one per failing window")
@@ -193,6 +197,42 @@ test("switch: an unreachable server aborts the switch with one error", function(
     eq(messages[1].msg,
       "Grip: could not connect to mydb: cannot reach h:5432 (connection refused). Is the server running?",
       "names the connection and the reason")
+  end)
+end)
+
+-- ── the connection belongs to the tab it was made in ─────────────────────
+
+test("switch: the connection is the tab's t:db and never g:db", function()
+  with_real_file(function()
+    local db = require("dadbod-grip.db")
+    local grip_tab = vim.api.nvim_get_current_tabpage()
+    connections.switch("sqlite:new.db", nil, nil, {})
+    flush_schedules()
+
+    eq(vim.t[grip_tab].db, "sqlite:new.db", "the tab that connected holds the URL")
+    eq(vim.g.db, nil, "g:db stays unset, so SQL buffers elsewhere see no database")
+    eq(db.active_url(), "sqlite:new.db", "grip still finds it in that tab")
+
+    vim.cmd("tabnew")
+    local ok, err = pcall(function()
+      eq(vim.t.db, nil, "a new tab has no t:db")
+      eq(db.active_url(), nil, "nor an active connection")
+      eq((db.get_url()), nil, "so a plain SQL buffer here is not connected")
+    end)
+    vim.cmd("tabclose")
+    if not ok then error(err, 0) end
+    eq(vim.api.nvim_get_current_tabpage(), grip_tab, "back in the grip tab")
+    eq(db.active_url(), "sqlite:new.db", "where the connection is untouched")
+  end)
+end)
+
+test("active_url: a vim.g.db the user set is still honored as a fallback", function()
+  with_real_file(function()
+    local db = require("dadbod-grip.db")
+    vim.g.db = "sqlite:user-set.db"
+    eq(db.active_url(), "sqlite:user-set.db", "g:db when the tab has none")
+    vim.t.db = "sqlite:tab.db"
+    eq(db.active_url(), "sqlite:tab.db", "the tab's own connection wins")
   end)
 end)
 

@@ -460,7 +460,7 @@ function M.list()
   end
 
   -- Current vim.g.db (if set and not already listed by URL)
-  local gdb = vim.g.db
+  local gdb = require("dadbod-grip.db").active_url()
   if type(gdb) == "string" and gdb ~= "" and not seen[gdb] then
     seen[gdb] = true
     table.insert(all, { name = "vim.g.db", url = gdb, source = "global" })
@@ -693,7 +693,7 @@ function M.switch(url, name, conn_type, opts)
     -- Mirrors the logic in init.lua so the query pad is wired to the same connection.
     -- The scheme test needs the resolved URL (a whole-URL template hides it);
     -- the pad is still bound to the template, which db.resolve() expands.
-    local active = vim.g.db
+    local active = require("dadbod-grip.db").active_url()
     local active_resolved = active and (M.expand_url(active) or active)
     local db_url = (active_resolved and active_resolved:match("^duckdb:")) and active
       or "duckdb::memory:"
@@ -730,8 +730,9 @@ function M.switch(url, name, conn_type, opts)
     return true
   end
 
-  -- Regular DB connection: set vim.g.db and open full workspace
-  vim.g.db = url
+  -- Regular DB connection: make it this tab's connection (t:db, not g:db --
+  -- see db.active_url) and open the full workspace
+  require("dadbod-grip.db").set_active_url(url)
 
   -- Restore persisted attachments for DuckDB connections (local file only;
   -- attachments are always saved to local by M.save_attachments).
@@ -816,7 +817,7 @@ end
 
 --- Get current connection info.
 function M.current()
-  local url = vim.g.db
+  local url = require("dadbod-grip.db").active_url()
   if type(url) ~= "string" or url == "" then
     url = os.getenv("DATABASE_URL")
   end

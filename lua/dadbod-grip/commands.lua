@@ -103,7 +103,7 @@ function M.register()
 
     -- Resolve connection
     local conn = vim.b.db
-    if type(conn) ~= "string" or conn == "" then conn = vim.g.db end
+    if type(conn) ~= "string" or conn == "" then conn = db.active_url() end
     if type(conn) == "table" and conn.db_url then conn = conn.db_url end
     if not conn or conn == "" then
       vim.notify("GripExplain: no database connection", vim.log.levels.WARN)
@@ -221,7 +221,7 @@ function M.register()
       saved.save_prompt(bufnr)
     else
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      saved.save(name, table.concat(lines, "\n"), vim.b[bufnr].db or vim.g.db)
+      saved.save(name, table.concat(lines, "\n"), vim.b[bufnr].db or db.active_url())
     end
   end, {
     nargs = "?",
@@ -424,7 +424,7 @@ function M.register()
     -- lives under in connections.json); conn_url is the expanded form the
     -- adapter's attachment registry is keyed by. This command bypasses
     -- db.resolve(), so it expands by hand.
-    local url = vim.g.db
+    local url = db.active_url()
     local conn_url = connections.expand_url(url)
     if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripAttach: requires a DuckDB connection. Use :GripConnect to switch.", vim.log.levels.WARN)
@@ -472,7 +472,7 @@ function M.register()
     local schema_mod = require("dadbod-grip.schema")
 
     -- Same template/expanded split as :GripAttach above.
-    local url = vim.g.db
+    local url = db.active_url()
     local conn_url = connections.expand_url(url)
     if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripDetach: requires a DuckDB connection.", vim.log.levels.WARN)

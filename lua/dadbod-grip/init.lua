@@ -322,7 +322,7 @@ end
 --- the template is what is returned: everything downstream expands it via
 --- db.resolve(), and history/view must not record the expansion.
 local function file_connection()
-  local active = vim.g.db
+  local active = db.active_url()
   local resolved = db.resolved_url(active)
   return (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
 end
@@ -335,7 +335,7 @@ function M.open(arg, url, opts)
   local conn = url
   if not conn or conn == "" then
     conn = vim.b.db
-    if not conn or conn == "" then conn = vim.g.db end
+    if not conn or conn == "" then conn = db.active_url() end
   end
 
   -- Resolve query spec (must happen before connection check for file-as-table).
@@ -459,7 +459,7 @@ function M.open_smart()
   local dbui_table = vim.b[bufnr].dbui_table_name
   if dbui_table and dbui_table ~= "" then
     local url = vim.b[bufnr].db
-    if type(url) ~= "string" or url == "" then url = vim.g.db end
+    if type(url) ~= "string" or url == "" then url = db.active_url() end
     if not url or url == "" then
       vim.notify("Grip: no database connection", vim.log.levels.WARN)
       return
@@ -483,7 +483,7 @@ function M.open_smart()
   if type(db_obj) == "table" and db_obj.db_url then
     local url = db_obj.db_url
     if not url or url == "" then url = vim.w.db end
-    if not url or url == "" then url = vim.g.db end
+    if not url or url == "" then url = db.active_url() end
     if not url or url == "" then
       vim.notify("Grip: no database connection", vim.log.levels.WARN)
       return
@@ -530,7 +530,7 @@ function M.open_smart()
   -- Case 3: No DBUI/dbout context: show table picker
   local conn = vim.b.db
   if type(conn) == "table" then conn = conn.db_url end
-  if not conn or conn == "" then conn = vim.g.db end
+  if not conn or conn == "" then conn = db.active_url() end
   if not conn or conn == "" then
     vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
     return

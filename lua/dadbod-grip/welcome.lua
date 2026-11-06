@@ -197,7 +197,7 @@ function M.open_welcome()
     require("dadbod-grip.connections").pick()
   end
   local function cur_conn()
-    local c = vim.g.db
+    local c = db.active_url()
     if type(c) ~= "string" or c == "" then c = os.getenv("DATABASE_URL") end
     return (c and c ~= "") and c or nil
   end

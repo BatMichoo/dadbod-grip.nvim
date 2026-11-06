@@ -354,7 +354,7 @@ function M.pick(opts)
           -- Both URLs are resolved first: a whole-URL template hides the
           -- scheme, and without this the action is hidden on a templated
           -- DuckDB connection even though its fn below handles one.
-          local cur = vim.g.db
+          local cur = require("dadbod-grip.db").active_url()
           cur = cur and (conn.expand_url(cur) or cur)
           local target = conn.expand_url(c.url) or c.url
           if not (cur and cur:find("^duckdb:")) or target:find("^duckdb:") then return false end
@@ -371,7 +371,7 @@ function M.pick(opts)
           -- disk); conn_url is what the adapter registry is keyed by. One of
           -- the four paths that bypass db.resolve(), so both the DuckDB URL
           -- and the target's URL are expanded by hand here.
-          local url = vim.g.db
+          local url = require("dadbod-grip.db").active_url()
           local conn_url = conn.expand_url(url)
           if not conn_url or not conn_url:find("^duckdb:") then
             vim.notify(

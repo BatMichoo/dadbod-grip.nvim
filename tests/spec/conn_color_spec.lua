@@ -173,11 +173,12 @@ test("the sidebar title is drawn with the accent group", function()
   local conns = require("dadbod-grip.connections")
 
   local orig = { lt = db.list_tables, lr = db.list_routines,
-                 cur = conns.current, g_db = vim.g.db }
+                 cur = conns.current, g_db = vim.g.db, t_db = vim.t.db }
   db.list_tables   = function() return { { name = "users", type = "table" } } end
   db.list_routines = function() return {} end
   conns.current    = function() return nil end  -- title falls back to the url
   vim.g.db = nil
+  vim.t.db = nil
 
   local ok, err = pcall(function()
     view.set_connection_accent("red")
@@ -203,7 +204,7 @@ test("the sidebar title is drawn with the accent group", function()
     end
   end
   db.list_tables, db.list_routines = orig.lt, orig.lr
-  conns.current, vim.g.db = orig.cur, orig.g_db
+  conns.current, vim.g.db, vim.t.db = orig.cur, orig.g_db, orig.t_db
   view.set_connection_accent(nil)
   if not ok then error(err) end
 end)
@@ -225,6 +226,9 @@ local function with_real_file(fn)
   local orig_expand = vim.fn.expand
   local orig_notify = vim.notify
   local orig_g_db = vim.g.db
+  -- switch() sets the tab's t:db, which outranks g:db: start each case clean.
+  local orig_t_db = vim.t.db
+  vim.t.db = nil
   local orig_opts = grip.get_opts()
   local orig_open = grip.open
   local orig_open_welcome = grip.open_welcome
@@ -263,6 +267,7 @@ local function with_real_file(fn)
   vim.fn.expand = orig_expand
   vim.notify = orig_notify
   vim.g.db = orig_g_db
+  vim.t.db = orig_t_db
   grip.setup(orig_opts)
   grip.open = orig_open
   grip.open_welcome = orig_open_welcome

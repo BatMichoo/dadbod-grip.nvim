@@ -10,13 +10,34 @@ local M = {}
 
 -- ── shared helpers (used by adapters via require("dadbod-grip.db")) ───────
 
---- Retrieve the connection URL from buffer-local or global dadbod var.
+--- The active connection: the current tab's t:db, which is what connecting
+--- sets, else a vim.g.db the user set themselves. Grip never writes g:db: it
+--- is editor-wide, and every dadbod-aware plugin (vim-dadbod-completion
+--- among them) would then reach for grip's database from SQL buffers in tabs
+--- that have nothing to do with it. t:db keeps the connection in the tab
+--- grip was connected from, and vim-dadbod reads t:db too.
+--- @return string|nil
+function M.active_url()
+  local tab_url = vim.t.db
+  if type(tab_url) == "string" and tab_url ~= "" then return tab_url end
+  local global_url = vim.g.db
+  if type(global_url) == "string" and global_url ~= "" then return global_url end
+  return nil
+end
+
+--- Make `url` the current tab's active connection.
+--- @param url string|nil
+function M.set_active_url(url)
+  vim.t.db = url
+end
+
+--- Retrieve the connection URL: explicit, else buffer-local, else active.
 function M.get_url(url)
   if url and url ~= "" then return url end
   local buf_url = vim.b.db
   if type(buf_url) == "string" and buf_url ~= "" then return buf_url end
-  local global_url = vim.g.db
-  if type(global_url) == "string" and global_url ~= "" then return global_url end
+  local active = M.active_url()
+  if active then return active end
   return nil, "No database connection. Use :GripConnect or set vim.g.db."
 end
 

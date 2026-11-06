@@ -64,6 +64,9 @@ local function with_real_file(fn)
   local orig_expand = vim.fn.expand
   local orig_notify = vim.notify
   local orig_g_db = vim.g.db
+  -- switch() sets the tab's t:db, which outranks g:db: start each case clean.
+  local orig_t_db = vim.t.db
+  vim.t.db = nil
   local orig_opts = grip.get_opts()
   local orig_open_welcome = grip.open_welcome
   local orig_schema = package.loaded["dadbod-grip.schema"]
@@ -102,6 +105,7 @@ local function with_real_file(fn)
   vim.fn.expand = orig_expand
   vim.notify = orig_notify
   vim.g.db = orig_g_db
+  vim.t.db = orig_t_db
   grip.setup(orig_opts)
   grip.open_welcome = orig_open_welcome
   package.loaded["dadbod-grip.schema"] = orig_schema
@@ -139,7 +143,8 @@ test("switch: a templated URL never reaches disk expanded", function()
     local raw = table.concat(vim.fn.readfile(local_grip .. "/connections.json"), "\n")
     assert(raw:find("${DB_URL}", 1, true), "template preserved on disk")
     assert(not raw:find("sqlite:/", 1, true), "expanded value must not be persisted")
-    eq(vim.g.db, "${DB_URL}", "vim.g.db holds the template")
+    eq(vim.t.db, "${DB_URL}", "the tab's t:db holds the template")
+    eq(vim.g.db, nil, "g:db is left alone")
   end)
 end)
 
@@ -151,11 +156,11 @@ test("switch: aborts without writing anything when a placeholder cannot be resol
       { name = "dev", url = "${MISSING_URL}", env_file = env_path },
     }) }, local_grip .. "/connections.json")
     local before = table.concat(vim.fn.readfile(local_grip .. "/connections.json"), "\n")
-    vim.g.db = nil
+    vim.t.db = nil
 
     connections.switch("${MISSING_URL}", "dev")
 
-    eq(vim.g.db, nil, "no connection activated")
+    eq(vim.t.db, nil, "no connection activated")
     eq(table.concat(vim.fn.readfile(local_grip .. "/connections.json"), "\n"), before,
       "nothing written: expansion is checked before any mutation")
   end)
@@ -734,7 +739,7 @@ test("an empty value in .env aborts the connection instead of dropping the passw
     vim.fn.writefile({ vim.fn.json_encode({
       { name = "dev", url = url, env_file = env_path },
     }) }, local_grip .. "/connections.json")
-    vim.g.db = nil
+    vim.t.db = nil
 
     local msgs = {}
     local harness_notify = vim.notify
@@ -743,7 +748,7 @@ test("an empty value in .env aborts the connection instead of dropping the passw
     vim.notify = harness_notify
 
     eq(committed, false, "the switch aborted")
-    eq(vim.g.db, nil, "no connection activated")
+    eq(vim.t.db, nil, "no connection activated")
     assert(msgs[1] and msgs[1]:find("${DEV_DB_PASSWORD}", 1, true),
       "and the message names the empty variable: " .. tostring(msgs[1]))
     eq(connections.expand_url(url), nil, "expansion refuses rather than returning u:@h")

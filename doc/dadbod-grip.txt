@@ -1037,7 +1037,16 @@ to keep its connections, history and saved queries.
   ~/.grip/connections.json   global profiles (shared across all projects)
   g:dbs                      vim-dadbod-ui compatible table (auto-saves to global)
   $DATABASE_URL              environment variable
-  g:db / b:db                vim-dadbod variables
+  g:db / b:db                vim-dadbod variables (read, never written)
+
+                                                        *grip-active-connection*
+The connection grip is on belongs to the tab you connected from: connecting
+sets that tab's `t:db`, and grip never writes `g:db`. A SQL buffer in another
+tab therefore has no database, so dadbod-aware plugins there (such as
+vim-dadbod-completion fetching table names) leave it alone. vim-dadbod and
+vim-dadbod-completion read `t:db`, so they still follow grip in its own tab.
+The query pad carries its connection in `b:db` and works in any tab. Grip
+falls back to a `g:db` you set yourself when the tab has no connection.
 
 Add a new connection: >
   :GripConnect postgresql://user:pass@localhost/mydb
@@ -1220,7 +1229,7 @@ reported as such by name rather than as a parse error, and because failed
 reads are never cached, `git-crypt unlock` takes effect on the very next
 connect with no restart.
 
-Grip stores and exposes the *template*: `vim.g.db` holds the url with the
+Grip stores and exposes the *template*: `t:db` holds the url with the
 placeholder still in it, and expansion happens at a single point on the way
 to the database client. No code path that writes to disk ever sees the
 expanded url. Passwords also reach psql, mysql, and sqlcmd through the process
@@ -1234,7 +1243,7 @@ invocation-scoped temporary DuckDB secrets and attach by secret name. Grip
 never creates persistent DuckDB secrets.
 
 Limit: a templated url is grip-only. vim-dadbod's `:DB` and any statusline
-reading `g:db` see the literal `${NAME}`. Keep such connections un-templated
+reading `t:db` see the literal `${NAME}`. Keep such connections un-templated
 if you depend on either.
 
                                                           *grip-readonly*
